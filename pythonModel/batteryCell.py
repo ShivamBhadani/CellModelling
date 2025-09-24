@@ -1,0 +1,342 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Mar 29 20:35:09 2025
+
+@author: Rajesh N Gupta
+"""
+import pandas as pd
+import numpy as np
+from cellESR import cellESR, LookupTableEstimator
+import math
+import matplotlib.pyplot as plt
+
+
+class Cell:
+    """ Store the path of all face images, name and label for a particular person. """
+    def __init__(self, chemID, corner="nom", R0, RZlist, seed=None):
+        'Later implement loading the pickle file with the object corresponding to this chemID'
+        self.cellName='generic'
+        self.SoC=[100.0]   # in percentage
+        self.SoH=[100.0]   # percentage of max capacity
+        self.MaxCapacity=65000   #units of milli-amp hour at time zero
+        self.capacityStdev=300   # sigma is 3%
+        #R0=2e-3 #ohms
+        #RZlist=[[1e-3,10,0],[1.5e-3,1e4,0],[8,5e-7,1]]
+        self.R0degradationParams=[6,0.015]
+        self.ZdegradationParams=[[6,0.015], [6,0.015], [6,0.015]]  # these numbers will be different, but length of this list must match RZ list 
+        
+        self.charging=True
+        self.discharging=True
+        if seed is not None:
+            np.random.seed(seed)
+
+        if corner == "low":
+            self.MaxCapacity *= 0.9
+            esrFactor = 1.1           
+            self.SoH = [90.0]
+            self.SoC = [85.0]
+            self.coulombEffeciency=[0.90]
+        elif corner == "high":
+            self.MaxCapacity *= 1.1
+            esrFactor = 0.9
+            self.SoH = [100.0]
+            self.SoC = [100.0]
+            self.coulombEffeciency=[0.98]
+        elif corner == "mc":
+            self.MaxCapacity = np.random.normal(self.MaxCapacity, self.capacityStdev)
+            esrFactor = np.random.normal(1, 0.03)
+            self.SoH = [min(100,np.random.normal(95.0, 1))]
+            self.SoC = [min(100,np.random.normal(95.0, 1))]
+            self.coulombEffeciency=[min(95,np.random.normal(90.0, 1))]
+        else:
+            #we are at nominal
+            esrFactor = 1
+            
+        R0*=esrFactor
+        for index, rc in enumerate(RZlist):
+            RZlist[index][0]=rc[0]*esrFactor
+
+        self.cellESR=cellESR(R0,RZlist)
+        self.charge=0
+        ocvLookup="Sample_OCV_DoD.csv"  # Path to the lookup table file
+        self.ocvEstimator=LookupTableEstimator(ocvLookup)
+        self.Temperature=[25]  # cell temperature in degree centigrade
+        self.current=[0]   # cell current positive means discharge negative means charging
+        self.esr=[self.cellESR.esrDC]
+        self.ocv=[self.ocvEstimator.output(100-self.SoC[-1],self.Temperature[-1])]
+        self.voltage=[self.ocv[-1]+self.current[-1]*self.esr[-1]]
+        self.time=[0]          # keep track of time
+        self.coulombEffeciency=[0.95]
+        
+        # ESR increases by a factor of 1.5X every -10C
+        esrLookup="Sample_ESR_DoD.csv"  # Path to the lookup table file
+        self.esrEstimator=LookupTableEstimator(esrLookup)
+        #Assuming Ro, RC list at 25C and 50% SoH we shouldscale accordingly
+        self.esrScaler=self.esrEstimator.output(100-self.SoC[-1],self.Temperature[-1])
+        # self.esrEstimator.output(DoD,Temperature) will look up the value vs. DoD and temperature
+        self.effectiveCycles=0.0 # measures degradation
+        self.charging=1
+        self.SoCLmax=0
+        self.SoCLmin=100
+        self.SoCnoiseThreshold=5 # threshold to determine if we are in charging or discharging mode
+        self.SoCextremaList=[]
+        self.NdegradationCalculated=0
+        ## Degradation SoHmax, DoDmax--> SOHmin and accumulated self discharge reducing SoH
+        ## Cycles reduce SoH
+        ## SoHmax may give a quadratic drop in SoH
+        self.SoCmaxDegradation=0
+        self.DoDmaxDegradation=0
+        
+    def SoCdegradation(self):
+        #Triggered when new max is hit
+        if (len(self.SoCextremaList)-self.NdegradationCalculated)==1:
+            self.DoDmaxDegradation=0
+            self.SoCmaxDegradation=0
+            if self.charging:
+                #DoDmax just got added, so DOD model
+                if self.SoCLmin<80:
+                    self.DoDmaxDegradation=(1/1000)*(50/(90*90))*((100-self.SoCLmin)**2)
+                self.NdegradationCalculated+=1
+            else:
+                #SoCMax just got calculated
+                if self.SoCLmax>20:
+                    self.SoCmaxDegradation=(1/1000)*(50/(90*90))*((self.SoCLmax)**2)
+                self.NdegradationCalculated+=1
+            self.updateSoH()
+            self.updateESR()
+
+    def updateESR(self):
+        self.cellESR.R0multiplier=self.R0degradationParams[0] * math.exp(self.R0degradationParams[1] * (100-self.SoH[-1])) + 1
+        for i, parameters in enumerate(self.ZdegradationParams):
+            self.cellESR.Zmultiplier[i]=parameters[0] * math.exp(parameters[1] * (100-self.SoH[-1])) + 1
+            
+
+    def updateSoH(self):
+        dSoH=self.DoDmaxDegradation+self.SoCmaxDegradation
+        print("dSoH is",dSoH)
+        self.SoH.append(self.SoH[-1]-dSoH)
+        
+    def checkFuse(self, time, i):
+        dt= time - self.time[-1]
+        discharge=i*dt
+        if discharge>0:
+            # We are discharging
+            dSoC=100*discharge/(self.coulombEffeciency[-1]*(3.6*self.SoH[-1]*self.MaxCapacity/100))            
+        else:
+            # We are charging
+            dSoC=100*discharge/(3.6*self.SoH[-1]*self.MaxCapacity/100)
+
+        if (self.SoC[-1]-dSoC)>=99 and i<0:
+            self.charge=False
+            #print("Cannot charge anymore battery full. SoC",self.SoC," SoH=",self.SoH," time=",time)
+            return False
+        elif (self.SoC[-1]-dSoC)<=1 and i>0:
+            #print("Cannot discharge anymore battery empty. SoC",self.SoC," SoH=",self.SoH," time=",time)
+            self.discharge=False
+            return False
+        else:
+            self.charge=True
+            self.discharge=True
+            return True
+        
+
+    def __call__(self,time,i, Temperature):
+        dt= time - self.time[-1]
+        discharge=i*dt
+        if discharge>0:
+            # We are discharging
+            dSoC=100*discharge/(self.coulombEffeciency[-1]*(3.6*self.SoH[-1]*self.MaxCapacity/100))            
+        else:
+            # We are charging
+            dSoC=100*discharge/(3.6*self.SoH[-1]*self.MaxCapacity/100)
+
+        if (self.SoC[-1]-dSoC)>=99 and i<0:
+            self.charge=False
+            print("Cannot charge anymore battery full. SoC",self.SoC," SoH=",self.SoH," time=",time)
+            return
+        elif (self.SoC[-1]-dSoC)<=1 and i>0:
+            print("Cannot discharge anymore battery empty. SoC",self.SoC," SoH=",self.SoH," time=",time)
+            self.discharge=False
+            return
+        else:
+            self.charge=True
+            self.discharge=True
+        
+        
+        self.Temperature.append(Temperature)
+        self.time.append(time)
+        self.esr.append(self.cellESR.calculateESR(i,dt))
+        
+        #print(dSoC)
+        self.charge-=dSoC
+        #print(self.charge)
+        self.SoC.append(self.SoC[-1]-dSoC)
+        self.ocv.append((self.ocvEstimator.output(100-self.SoC[-1],self.Temperature[-1]))*self.ocvSoH_gain())
+        self.voltage.append(self.ocv[-1]+i*self.esr[-1])
+        self.current.append(i)
+        if self.charging:
+            if (self.SoCLmax-self.SoC[-1])>self.SoCnoiseThreshold:
+                self.charging=0
+                self.SoCextremaList.append(self.SoCLmax)
+                self.SoCLmin=self.SoC[-1]
+                self.SoCdegradation()
+            else:
+                self.SoCLmax=max(self.SoCLmax,self.SoC[-1])
+        else:
+            if (self.SoC[-1]-self.SoCLmin)>self.SoCnoiseThreshold:
+                self.charging=1
+                self.SoCextremaList.append(self.SoCLmin)
+                self.SoCLmax=self.SoC[-1]
+                self.SoCdegradation()
+            else:
+                self.SoCLmin=min(self.SoCLmin,self.SoC[-1])
+            
+                
+    def ocvSoH_gain(self):
+        #simple linear model for OCV change vs. SoH
+        # Y=1+((1-SoH/MaxCapacity)/150)*(SoC-50)   and OCV is OCV*Y
+        return 1+((100-self.SoH[-1])/15000)*(self.SoC[-1]-50)
+        
+    def __str__(self):
+        return (f"BatteryCell: Capacity = {self.MaxCapacity:.2f} mAh, "
+                f"Internal Resistance = {self.cellESR.esrDC:.4f} Ohms, "
+                f"Health = {self.SoH[-1]:.1f}% "
+                f"Charge = {self.SoC[-1]:.1f}%")
+    
+    def plot_cell_properties(self, y_property='SoH', x_property='time', figsize=(12, 6), 
+                             colors=None, title=None, x_label=None, y_label=None, 
+                             save_path=None, show_plot=True):
+        """
+        Plot a family of curves, one for each cell in the battery, showing the relationship
+        between two properties. Default x-axis is time.
+        
+        Parameters:
+        -----------
+        y_property : str, default='SoH'
+            Name of the cell property to plot on the y-axis
+        x_property : str, default='time'
+            Name of the cell property to plot on the x-axis
+        figsize : tuple, default=(12, 6)
+            Figure size as (width, height) in inches
+        colors : list, default=None
+            List of colors for each cell. If None, a default color cycle is used
+        title : str, default=None
+            Plot title. If None, a title is automatically generated
+        x_label : str, default=None
+            Label for x-axis. If None, uses x_property
+        y_label : str, default=None
+            Label for y-axis. If None, uses y_property
+        save_path : str, default=None
+            Path to save the figure. If None, figure is not saved
+        show_plot : bool, default=True
+            Whether to display the plot (plt.show())
+        
+        Returns:
+        --------
+        fig, ax : matplotlib figure and axes objects
+        """
+        
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=figsize)
+        
+        # Use default color cycle if colors not provided
+        if colors is None:
+            # Use a colorblind-friendly palette
+            colors = plt.cm.tab10.colors
+        
+        # Generate title if not provided
+        if title is None:
+            title = f"{y_property} vs {x_property} for Battery Cells"
+        
+        # Set labels
+        ax.set_xlabel(x_label if x_label is not None else x_property)
+        ax.set_ylabel(y_label if y_label is not None else y_property)
+        ax.set_title(title)
+        
+        # Plot each cell with a different color
+        for i, cell in enumerate(self.cells):
+            # Get the data for each property
+            try:
+                y_data = getattr(cell, y_property)
+                x_data = getattr(cell, x_property)
+            except AttributeError as e:
+                print(f"Error accessing property for cell {i}: {e}")
+                continue
+            
+            # Check if data exists and has the right format
+            if x_data is None or y_data is None:
+                print(f"No data for cell {i}")
+                continue
+                
+            # Make sure data has the same length
+            if len(x_data) != len(y_data):
+                print(f"Warning: Data length mismatch for cell {i}. x: {len(x_data)}, y: {len(y_data)}")
+                # Use the minimum length
+                min_len = min(len(x_data), len(y_data))
+                x_data = x_data[:min_len]
+                y_data = y_data[:min_len]
+            
+            # Plot with cell index in legend
+            color = colors[i % len(colors)]  # Cycle through colors if more cells than colors
+            ax.plot(x_data, y_data, color=color, label=f"Cell {i}")
+        
+        # Add legend
+        ax.legend(loc='best')
+        
+        # Add grid for better readability
+        ax.grid(True, linestyle='--', alpha=0.7)
+        
+        # Save figure if path provided
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        
+        # Show plot if requested
+        if show_plot:
+            plt.tight_layout()
+            plt.show()
+        
+        return fig, ax
+
+'''
+cell1 = Cell("LiFePO4", corner="nom", seed=42)  # Random parameters with reproducibility
+cell2 = Cell("LiFePO4", corner="mc")  # Same seed will result in identical parameters
+cell3 = Cell("LiFePO4", corner="low")  # Same seed will result in identical parameters
+cell4 = Cell("LiFePO4", corner="high")  # Same seed will result in identical parameters
+'''
+
+R0=2e-3 #ohms
+RZlist=[[1e-3,10,0],[1.5e-3,1e4,0],[8,5e-7,1]]
+
+corners=["nom","low","high","mc",'mc',"mc",'mc',"mc"]
+#corners=['nom']
+battery=[]
+battery_model=[]
+for corner in corners:
+    battery.append(Cell("Li_Ion", corner=corner, R0, RZlist))
+                
+input_csv = 'test_sequence.csv'
+#input_csv = 'la92shortdds.csv'
+data = pd.read_csv(input_csv)
+offset=0
+time = data['Time'].values[offset:]
+current = data['Current'].values[offset:]
+temperature= data['Temperature'].values[offset:]
+charge=0
+for i, t in enumerate(time):
+    fuse=True
+    if i!=0:
+        for cell in battery:
+            fuse = fuse and cell.checkFuse(t,current[i])
+
+        if fuse:
+            for cell in battery:
+                cell(t,current[i],temperature[i])
+                
+        else:
+            print("protection fuse blown")
+        
+    
+
+
+for cell in battery:
+    print(cell)
