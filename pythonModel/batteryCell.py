@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 class Cell:
     """ Store the path of all face images, name and label for a particular person. """
-    def __init__(self, chemID, corner="nom", R0, RZlist, seed=None):
+    def __init__(self, chemID, R0, RZlist, corner="nom", seed=None):
         'Later implement loading the pickle file with the object corresponding to this chemID'
         self.cellName='generic'
         self.SoC=[100.0]   # in percentage
@@ -312,7 +312,7 @@ corners=["nom","low","high","mc",'mc',"mc",'mc',"mc"]
 battery=[]
 battery_model=[]
 for corner in corners:
-    battery.append(Cell("Li_Ion", corner=corner, R0, RZlist))
+    battery.append(Cell("Li_Ion", R0, RZlist, corner=corner))
                 
 input_csv = 'test_sequence.csv'
 #input_csv = 'la92shortdds.csv'
