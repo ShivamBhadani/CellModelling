@@ -36,12 +36,12 @@ ocvLookup="Sample_OCV_DoD.csv"
 
 dCurrent=0.0005 # sigma for current measurement
 dVoltage=5/64000  # 15bit enob for 1 sigma
-dTemperature=0.0 # 0.1deg sigma for temperature measurement
+dTemperature=0.1 # 0.1deg sigma for temperature measurement
 cell_stats['T']['var']=dTemperature**2
 
 
 corners=["nom","low","high","mc",'mc',"mc",'mc',"mc"]
-corners=['nom']
+corners=['low']
 battery=[]
 battery_model=[]
 soc_true=[]
@@ -65,7 +65,7 @@ current = data['Current'].values[offset:]
 temperature= data['Temperature'].values[offset:]
 
 
-max_loop=800
+max_loop=10000
 loop_count=0
 charge=0
 previous_t=0
@@ -90,8 +90,8 @@ for i, time in enumerate(time_measured):
                 for cell, cell_model in zip(battery,battery_model):
                     cell(t,current_now,temperature_now)
                     voltage_measured=cell.voltage[-1] + np.random.normal(loc=0.0, scale=dVoltage, size=None)
-                    #battery_stats['I']['mean']=current_measured
-                    battery_stats['I']['mean']=current_now
+                    battery_stats['I']['mean']=current_measured
+                    #battery_stats['I']['mean']=current_now
                     
                     battery_stats['I']['var']=(1e-3*current_measured)**2
                     cell_stats['T']['mean']=temperature_measured                    

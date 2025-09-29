@@ -175,7 +175,7 @@ class Cell:
         self.SoC.append(self.SoC[-1]-dSoC)
         self.ocv.append((self.ocvEstimator.output(100-self.SoC[-1],self.Temperature[-1]))*self.ocvSoH_gain())
         self.voltage.append(self.ocv[-1]+i*self.esr[-1])
-        print("True cell Soc=",self.SoC[-1]," OCV=", self.ocv[-1], " Voltage=",self.voltage[-1]," time=",time," ESR time=",self.cellESR.time)
+        #print("True cell Soc=",self.SoC[-1]," OCV=", self.ocv[-1], " Voltage=",self.voltage[-1]," time=",time," ESR time=",self.cellESR.time)
         self.current.append(i)
         if self.charging:
             if (self.SoCLmax-self.SoC[-1])>self.SoCnoiseThreshold:
