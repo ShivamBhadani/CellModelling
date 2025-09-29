@@ -6,6 +6,7 @@ Created on Tue Sep 23 19:55:21 2025
 """
 
 import numpy as np
+from cellESR import cellESR, LookupTableEstimator
 
 class StatisticsEstimator:
     def __init__(self, variable_stats):
@@ -53,7 +54,7 @@ class StatisticsEstimator:
         total = 0
         for i, v in enumerate(vars):
             v_i = self.get_var(v)
-            print(v," get_var=",v_i)
+            #print(v," get_var=",v_i)
             other_means_squared = 1
             for j, u in enumerate(vars):
                 if i != j:
@@ -74,11 +75,21 @@ class SoCUKFEstimator:
         self.cellESR=cellESR(cell_stats['R0']['mean'],RZlist)
         self.socEstimator=LookupTableEstimator(ocvLookup)
         self.P = 1.0  # initial variance on soc estimate
+        self.vNoise=0.001 #1mV
+        self.dOCV= 0.001 #1mV
+        self.dZ=0.05 #5%
         #self.C = capacity
         #self.eta = eta
         #self.Id = Id
+        self.x_pred=0.9
+        self.common_factors = ['dt', 'Qc^-1']
+        self.inner_term = [
+            ['eta^-1', 'I'],
+            ['-Id'] ]
+
+
         self.Q = 0.1  #variance in SoC update lets calculate this
-        self.R = R  #variance in voltage/ocv measurements from lookup and noise/errors, lets 
+        #self.R = R  #variance in voltage/ocv measurements from lookup and noise/errors, lets 
         self.lambda_=0.1
 
 
@@ -86,31 +97,51 @@ class SoCUKFEstimator:
         n = 1
         #lambda_ = self.alpha**2 * (n + self.kappa) - n
         sigma_points = [x]
-        sqrt_P = np.sqrt((n + self.lambda_) * P)
+        sqrt_P = np.sqrt((self.lambda_) * P)
         sigma_points.append(min(x + sqrt_P,1))
         sigma_points.append(max(x - sqrt_P,0))
         weights=[y/x for y in sigma_points]
+        print("p=",P," sqrt_P=",sqrt_P," sigma points=",sigma_points)
+        print("weights=",weights)
         return np.array(sigma_points), np.array(weights)
 
-    def predict(self, I_k, delta_t):
-        I_eff = self.eta * I_k if I_k > 0 else I_k
-        
-        self.x_pred = self.x_est + (I_eff * delta_t) / self.C - (self.Id * delta_t) / self.C
+    def predict(self):
+        #I_eff = self.eta * I_k if I_k > 0 else I_k
+        if self.variable_stats['I']['mean']<0:
+            self.inner_term = [
+                ['eta^-1', 'I'],
+                ['-Id'] ]
+        else:
+            self.inner_term = [
+                ['I'],
+                ['-Id'] ]
+                           
+        self.Qcharge, self.Q = self.stats(self.common_factors, self.inner_term)
+        self.x_pred = self.x_est + self.Qcharge
         self.P_pred = self.P + self.Q
+        print("dQ=",self.Qcharge)
 
     def update(self, V_k):
         sigma_points, weights = self._generate_sigma_points(self.x_pred, self.P_pred)
         weights_mean = np.mean(weights)
-        weights_cov = weights_mean.copy()
-
-        predicted_measurements = [3.0 + 0.01 * sp for sp in sigma_points]
-        z_pred = np.dot(weights_mean, predicted_measurements)
-        P_zz = self.R + sum(weights_cov[i] * (predicted_measurements[i] - z_pred)**2 for i in range(3))
-        P_xz = sum(weights_cov[i] * (sigma_points[i] - self.x_pred) * (predicted_measurements[i] - z_pred) for i in range(3))
+        #weights_cov = weights_mean.copy()
+        #Variance is v_noise+d_ocv+dI*z+I*dZ, since dI/I is much smaller than dZ/Z, ignore dI
+        deltaV=self.cellESR.calculateESR(self.variable_stats['I']['mean'],self.variable_stats['dt']['mean'])*self.variable_stats['I']['mean']
+        print("deltaV=",deltaV)
+        self.R=self.vNoise**2+self.dOCV**2+(self.dZ**2)*deltaV
+        predicted_measurements = [self.socEstimator.output(100*(1-sp),self.variable_stats['T']['mean'])+deltaV for sp in sigma_points]
+        print("predicted measurements=",predicted_measurements)
+        z_pred = np.dot(weights, predicted_measurements)/np.sum(weights)
+        
+        
+        P_zz = self.R + sum(weights[i] * (predicted_measurements[i] - z_pred)**2 for i in range(3))
+        P_xz = sum(weights[i] * (sigma_points[i] - self.x_pred) * (predicted_measurements[i] - z_pred) for i in range(3))
 
         K = P_xz / P_zz
-        self.x_est = self.x_pred + K * (V_k - z_pred)
+        self.x_est = min(1, self.x_pred + K * (V_k - z_pred))
         self.P = self.P_pred - K * P_zz * K
-
+        print("K=",K," P_xz=",P_xz)
+        print("v_k=",V_k," Zpred=",z_pred)
+        print("x_est=",self.x_est," x_pred=",self.x_pred)
     def get_estimate(self):
         return self.x_est

@@ -6,54 +6,117 @@ Created on Tue Sep 23 19:54:10 2025
 """
 
 
-#initial_soc, capacity, eta, Id, Q, R
-variable_stats = {
-    'dt':   {'mean': 2.0, 'var': 0.1},
-    'Qc':   {'mean': 3.0, 'var': 0.2},
-    'eta':  {'mean': 1.5, 'var': 0.05},
-    'I':    {'mean': 0, 'var': 0.3},
-    'Id':   {'mean': 1.2, 'var': 0.1}
-}
 
-
+import numpy as np
 from batteryCell import Cell
+from cellUKFmodel import SoCUKFEstimator
+import pandas as pd
+import matplotlib.pyplot as plt
 
 
+#initial_soc, capacity, eta, Id, Q, R
 
+battery_stats = {
+    'dt':   {'mean': 1e-2, 'var': 1e-8},
+    'I':    {'mean': 0, 'var': 0}
+# period of IV measurements, jitter in IV mesurements
+#I and (0.0005*I)**2
+}
+    
+cell_stats = {
+    'Qc':   {'mean': 65*3600, 'var': 0.02*0.02*65},
+    'eta':  {'mean': 0.98, 'var': 0.01*0.01},
+    'Id':   {'mean': 1e-3, 'var': 0.25e-6},
+    'T' :   {'mean': 25, 'var': 0.01},
+    'R0' :   {'mean': 0.005 , 'var': 0.25e-6},    
+}
+R0=2e-3 #ohms
+RZlist=[[1e-3,10,0],[1.5e-3,1e4,0],[8,5e-7,1]]
+ocvLookup="Sample_OCV_DoD.csv"
 
-
+dCurrent=0.0005 # sigma for current measurement
+dVoltage=5/64000  # 15bit enob for 1 sigma
+dTemperature=0.1 # 0.1deg sigma for temperature measurement
+cell_stats['T']['var']=dTemperature**2
 
 
 corners=["nom","low","high","mc",'mc',"mc",'mc',"mc"]
-#corners=['nom']
+corners=['nom']
 battery=[]
 battery_model=[]
-for corner in corners:
-    battery.append(Cell("Li_Ion", corner=corner))
-                
+soc_true=[]
+soc_est=[]
+P_values=[]
+I_values=[]
+for i, corner in enumerate(corners):
+    battery.append(Cell("Li_Ion", R0, RZlist, corner=corner))
+    battery_model.append(SoCUKFEstimator(battery_stats, cell_stats, RZlist, ocvLookup))
+    soc_true.append([])
+    soc_est.append([])
+    P_values.append([])
+    I_values.append([])
+           
 input_csv = 'test_sequence.csv'
 #input_csv = 'la92shortdds.csv'
 data = pd.read_csv(input_csv)
 offset=0
-time = data['Time'].values[offset:]
+time_measured = data['Time'].values[offset:]
 current = data['Current'].values[offset:]
 temperature= data['Temperature'].values[offset:]
+
+
+max_loop=200
+loop_count=0
 charge=0
-for i, t in enumerate(time):
+previous_t=0
+t_model=0
+
+for i, time in enumerate(time_measured):
     fuse=True
     if i!=0:
-        for cell in battery:
-            fuse = fuse and cell.checkFuse(t,current[i])
+        for j, cell in enumerate(battery):
+            fuse = fuse and cell.checkFuse(time,current[i])
 
         if fuse:
-            for cell in battery:
-                cell(t,current[i],temperature[i])
-                
+            for nclk in range(int(previous_t/battery_stats['dt']['mean']), int(time/battery_stats['dt']['mean'])):
+                loop_count=loop_count+1
+                if loop_count>max_loop:
+                    break
+                t=nclk*battery_stats['dt']['mean']+np.random.normal(loc=0.0, scale=np.sqrt(battery_stats['dt']['var']), size=None)
+                current_now=current[i-1]+(current[i]-current[i-1])*nclk*battery_stats['dt']['mean']/(time-previous_t)
+                current_measured=current_now*(1+np.random.normal(loc=0.0, scale=dCurrent, size=None))
+                temperature_now=temperature[i-1]+(temperature[i]-temperature[i-1])*nclk*battery_stats['dt']['mean']/(time-previous_t)
+                temperature_measured=temperature_now+np.random.normal(loc=0.0, scale=dTemperature, size=None)         
+                for cell, cell_model in zip(battery,battery_model):
+                    cell(t,current_now,temperature_now)
+                    voltage_measured=cell.voltage[-1] + np.random.normal(loc=0.0, scale=dVoltage, size=None)
+                    battery_stats['I']['mean']=current_measured
+                    battery_stats['I']['var']=(1e-3*current_measured)**2
+                    cell_stats['T']['mean']=temperature_measured                    
+                    # Run the UKF steps
+                    cell_model.predict()
+                    cell_model.update(voltage_measured)
+                    soc_true[j].append(cell.SoC[-1])
+                    soc_est[j].append(100*cell_model.get_estimate())
+                    P_values[j].append(cell_model.P)
+                    I_values[j].append(current_measured)
         else:
             print("protection fuse blown")
-        
-    
+    previous_t=time    
+    if loop_count>max_loop:
+        break
 
 
-for cell in battery:
+for i, cell in enumerate(battery):
     print(cell)
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 3, 1)
+    plt.plot(soc_true[i], label='True SoC')
+    plt.plot(soc_est[i], label='Estimated SoC')
+    plt.legend()
+    plt.title('SoC Estimation')
+    
+    plt.subplot(1, 3, 2)
+    plt.plot(P_values[i])
+    plt.title('Covariance P Over Time')
+    plt.xlabel('Time Step')

@@ -23,7 +23,8 @@ def coupled_ode(t, y, tau):
 # Parameters
 tau = 1  # Relaxation time constant
 i1_initial = 0.0  # Initial condition for i1
-t_span = (0, 10)  # Time range
+t_span = (0, 10
+          )  # Time range
 t_eval = np.linspace(t_span[0], t_span[1], 20)  # Time points for evaluation
 dt=t_eval[1]-t_eval[0]
 # Solve the ODE using the original method

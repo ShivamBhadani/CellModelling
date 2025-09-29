@@ -113,7 +113,7 @@ class Cell:
 
     def updateSoH(self):
         dSoH=self.DoDmaxDegradation+self.SoCmaxDegradation
-        print("dSoH is",dSoH)
+        #print("dSoH is",dSoH)
         self.SoH.append(self.SoH[-1]-dSoH)
         
     def checkFuse(self, time, i):

@@ -79,11 +79,12 @@ class SoCUKFEstimator:
     def get_estimate(self):
         return self.x_est
     
+
+#R0=2e-3 #ohms
+#RZlist=[[1e-3,10,0],[1.5e-3,1e4,0],[8,5e-7,1]]
+
+
 import matplotlib.pyplot as plt
-
-        R0=2e-3 #ohms
-        RZlist=[[1e-3,10,0],[1.5e-3,1e4,0],[8,5e-7,1]]
-
 
 cell = Cell(capacity=100.0, eta=0.97, Id=1e-6)
 estimator = SoCUKFEstimator(initial_soc=50.0, capacity=100.0, eta=0.99, Id=1e-6, Q=0.1, R=0.05)
