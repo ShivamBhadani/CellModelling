@@ -117,30 +117,41 @@ class SoCUKFEstimator:
                 ['-Id'] ]
                            
         self.Qcharge, self.Q = self.stats(self.common_factors, self.inner_term)
-        self.x_pred = self.x_est + self.Qcharge
+        self.x_pred = self.x_est - self.Qcharge
         self.P_pred = self.P + self.Q
         print("dQ=",self.Qcharge)
 
     def update(self, V_k):
+        
         sigma_points, weights = self._generate_sigma_points(self.x_pred, self.P_pred)
         weights_mean = np.mean(weights)
         #weights_cov = weights_mean.copy()
         #Variance is v_noise+d_ocv+dI*z+I*dZ, since dI/I is much smaller than dZ/Z, ignore dI
         deltaV=self.cellESR.calculateESR(self.variable_stats['I']['mean'],self.variable_stats['dt']['mean'])*self.variable_stats['I']['mean']
-        print("deltaV=",deltaV)
+        print("deltaV=",deltaV," time=",self.cellESR.time)
         self.R=self.vNoise**2+self.dOCV**2+(self.dZ**2)*deltaV
         predicted_measurements = [self.socEstimator.output(100*(1-sp),self.variable_stats['T']['mean'])+deltaV for sp in sigma_points]
-        print("predicted measurements=",predicted_measurements)
-        z_pred = np.dot(weights, predicted_measurements)/np.sum(weights)
+        
+        if (max(sigma_points)<1) and (min(sigma_points)>0):
+            z_pred = np.dot(weights, predicted_measurements)/np.sum(weights)
+            P_xz = sum(weights[i] * (sigma_points[i] - self.x_pred) * (predicted_measurements[i] - z_pred) for i in range(3))
+            P_zz = sum(weights[i] * (predicted_measurements[i] - z_pred)**2 for i in range(3))
+            slope=(P_xz / P_zz)
+        else:
+            z_pred=predicted_measurements[0]
+            if (max(sigma_points)<1):
+                slope=(predicted_measurements[0]-predicted_measurements[2])/(sigma_points[0]-sigma_points[2])
+            else:
+                slope=(predicted_measurements[0]-predicted_measurements[1])/(sigma_points[0]-sigma_points[1])
+                P_zz = sum(weights[i] * (predicted_measurements[i] - z_pred)**2 for i in range(3))
+        print("z_pred=",z_pred," predicted measurements=",predicted_measurements)
         
         
-        P_zz = self.R + sum(weights[i] * (predicted_measurements[i] - z_pred)**2 for i in range(3))
-        P_xz = sum(weights[i] * (sigma_points[i] - self.x_pred) * (predicted_measurements[i] - z_pred) for i in range(3))
 
-        K = P_xz / P_zz
+        K = slope*(self.P/(self.P+self.R))
         self.x_est = min(1, self.x_pred + K * (V_k - z_pred))
         self.P = self.P_pred - K * P_zz * K
-        print("K=",K," P_xz=",P_xz)
+        print("K=",K," Slope=",slope)
         print("v_k=",V_k," Zpred=",z_pred)
         print("x_est=",self.x_est," x_pred=",self.x_pred)
     def get_estimate(self):

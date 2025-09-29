@@ -70,6 +70,7 @@ class Cell:
         
         # ESR increases by a factor of 1.5X every -10C
         esrLookup="Sample_ESR_DoD.csv"  # Path to the lookup table file
+        #Assuming Ro, RC list at 25C and 50% SoH we should scale accordingly
         self.esrEstimator=LookupTableEstimator(esrLookup)
         #Assuming Ro, RC list at 25C and 50% SoH we shouldscale accordingly
         self.esrScaler=self.esrEstimator.output(100-self.SoC[-1],self.Temperature[-1])
@@ -103,10 +104,11 @@ class Cell:
                     self.SoCmaxDegradation=(1/1000)*(50/(90*90))*((self.SoCLmax)**2)
                 self.NdegradationCalculated+=1
             self.updateSoH()
-            self.updateESR()
+            #self.updateESR()
 
     def updateESR(self):
         self.cellESR.R0multiplier=self.R0degradationParams[0] * math.exp(self.R0degradationParams[1] * (100-self.SoH[-1])) + 1
+        print("updated R0 multiplier=",self.cellESR.R0multiplier)
         for i, parameters in enumerate(self.ZdegradationParams):
             self.cellESR.Zmultiplier[i]=parameters[0] * math.exp(parameters[1] * (100-self.SoH[-1])) + 1
             
@@ -173,6 +175,7 @@ class Cell:
         self.SoC.append(self.SoC[-1]-dSoC)
         self.ocv.append((self.ocvEstimator.output(100-self.SoC[-1],self.Temperature[-1]))*self.ocvSoH_gain())
         self.voltage.append(self.ocv[-1]+i*self.esr[-1])
+        print("True cell Soc=",self.SoC[-1]," OCV=", self.ocv[-1], " Voltage=",self.voltage[-1]," time=",time," ESR time=",self.cellESR.time)
         self.current.append(i)
         if self.charging:
             if (self.SoCLmax-self.SoC[-1])>self.SoCnoiseThreshold:

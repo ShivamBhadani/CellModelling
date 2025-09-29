@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 #initial_soc, capacity, eta, Id, Q, R
 
 battery_stats = {
-    'dt':   {'mean': 1e-2, 'var': 1e-8},
+    'dt':   {'mean': 1, 'var': 1e-8},
     'I':    {'mean': 0, 'var': 0}
 # period of IV measurements, jitter in IV mesurements
 #I and (0.0005*I)**2
@@ -28,15 +28,15 @@ cell_stats = {
     'eta':  {'mean': 0.98, 'var': 0.01*0.01},
     'Id':   {'mean': 1e-3, 'var': 0.25e-6},
     'T' :   {'mean': 25, 'var': 0.01},
-    'R0' :   {'mean': 0.005 , 'var': 0.25e-6},    
+    'R0' :   {'mean': 0.002 , 'var': 0.25e-6},    
 }
-R0=2e-3 #ohms
+R0=cell_stats['R0']['mean'] #ohms
 RZlist=[[1e-3,10,0],[1.5e-3,1e4,0],[8,5e-7,1]]
 ocvLookup="Sample_OCV_DoD.csv"
 
 dCurrent=0.0005 # sigma for current measurement
 dVoltage=5/64000  # 15bit enob for 1 sigma
-dTemperature=0.1 # 0.1deg sigma for temperature measurement
+dTemperature=0.0 # 0.1deg sigma for temperature measurement
 cell_stats['T']['var']=dTemperature**2
 
 
@@ -65,7 +65,7 @@ current = data['Current'].values[offset:]
 temperature= data['Temperature'].values[offset:]
 
 
-max_loop=200
+max_loop=800
 loop_count=0
 charge=0
 previous_t=0
@@ -78,11 +78,11 @@ for i, time in enumerate(time_measured):
             fuse = fuse and cell.checkFuse(time,current[i])
 
         if fuse:
-            for nclk in range(int(previous_t/battery_stats['dt']['mean']), int(time/battery_stats['dt']['mean'])):
+            for nclk in range(int((time-previous_t)/battery_stats['dt']['mean'])):
                 loop_count=loop_count+1
                 if loop_count>max_loop:
                     break
-                t=nclk*battery_stats['dt']['mean']+np.random.normal(loc=0.0, scale=np.sqrt(battery_stats['dt']['var']), size=None)
+                t=time_measured[i-1] + nclk*battery_stats['dt']['mean']+np.random.normal(loc=0.0, scale=np.sqrt(battery_stats['dt']['var']), size=None)
                 current_now=current[i-1]+(current[i]-current[i-1])*nclk*battery_stats['dt']['mean']/(time-previous_t)
                 current_measured=current_now*(1+np.random.normal(loc=0.0, scale=dCurrent, size=None))
                 temperature_now=temperature[i-1]+(temperature[i]-temperature[i-1])*nclk*battery_stats['dt']['mean']/(time-previous_t)
@@ -90,7 +90,9 @@ for i, time in enumerate(time_measured):
                 for cell, cell_model in zip(battery,battery_model):
                     cell(t,current_now,temperature_now)
                     voltage_measured=cell.voltage[-1] + np.random.normal(loc=0.0, scale=dVoltage, size=None)
-                    battery_stats['I']['mean']=current_measured
+                    #battery_stats['I']['mean']=current_measured
+                    battery_stats['I']['mean']=current_now
+                    
                     battery_stats['I']['var']=(1e-3*current_measured)**2
                     cell_stats['T']['mean']=temperature_measured                    
                     # Run the UKF steps
