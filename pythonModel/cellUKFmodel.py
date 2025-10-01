@@ -129,7 +129,7 @@ class SoCUKFEstimator:
         #Variance is v_noise+d_ocv+dI*z+I*dZ, since dI/I is much smaller than dZ/Z, ignore dI
         deltaV=self.cellESR.calculateESR(self.variable_stats['I']['mean'],self.variable_stats['dt']['mean'])*self.variable_stats['I']['mean']
         #print("deltaV=",deltaV," time=",self.cellESR.time)
-        self.R=self.vNoise**2+self.dOCV**2+(self.dZ**2)*deltaV
+        self.R=self.vNoise**2+self.dOCV**2+(self.dZ**2)*abs(deltaV)
         predicted_measurements = [self.socEstimator.output(100*(1-sp),self.variable_stats['T']['mean'])+deltaV for sp in sigma_points]
         
         if (max(sigma_points)<1) and (min(sigma_points)>0):
@@ -149,9 +149,28 @@ class SoCUKFEstimator:
         
         
 
-        K = slope*(self.P/(self.P+self.R))
-        self.x_est = min(1, self.x_pred + K * (V_k - z_pred))
-        self.P = self.P_pred - K * P_zz * K
+        K = slope*(self.P_pred/(self.P_pred+self.R))
+        self.x_est=min(1,max(self.x_pred + K * (V_k - z_pred),0))
+        self.P = max(self.P_pred - K * P_zz * K, self.Q)
+        
+        x_est=self.x_pred + K * (V_k - z_pred)
+        P=self.P_pred - K * P_zz * K
+        if x_est>0 and x_est<1:
+            if self.x_est != x_est:
+                print("lets investigate x_est=",x_est," self.x_est=",self.x_est)
+            if P!= self.P:
+                print("lets investigate p=",P," self.P=",self.P)
+                print("self.P_pred=",self.P_pred," K=",K, "Pzz=",P_zz)
+        elif x_est>=1:
+            if self.x_est !=1:
+                print("lets investigate why x_est not clipped x_est=",x_est," self.x_est=",self.x_est)
+            #don't update self.P
+        else:
+            if self.x_est !=0:
+                print("lets investigate why x_est not clipped x_est=",x_est," self.x_est=",self.x_est)
+            
+            
+            
         #print("K=",K," Slope=",slope)
         #print("v_k=",V_k," Zpred=",z_pred)
         #print("post update x_est=",self.x_est," x_pred=",self.x_pred)

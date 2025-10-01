@@ -57,7 +57,7 @@ class Cell:
             RZlist[index][0]=rc[0]*esrFactor
 
         self.cellESR=cellESR(R0,RZlist)
-        self.charge=0 #TODO units? colomb? or remaining capacity in mAh? or bool?
+        self.charge=0
         ocvLookup="Sample_OCV_DoD.csv"  # Path to the lookup table file
         self.ocvEstimator=LookupTableEstimator(ocvLookup)
         self.Temperature=[25]  # cell temperature in degree centigrade
@@ -73,7 +73,7 @@ class Cell:
         #Assuming Ro, RC list at 25C and 50% SoH we should scale accordingly
         self.esrEstimator=LookupTableEstimator(esrLookup)
         #Assuming Ro, RC list at 25C and 50% SoH we shouldscale accordingly
-        self.esrScaler=self.esrEstimator.output(100-self.SoC[-1],self.Temperature[-1]) #TODO update
+        self.esrScaler=self.esrEstimator.output(100-self.SoC[-1],self.Temperature[-1])
         # self.esrEstimator.output(DoD,Temperature) will look up the value vs. DoD and temperature
         self.effectiveCycles=0.0 # measures degradation
         self.charging=1
@@ -90,7 +90,7 @@ class Cell:
         
     def SoCdegradation(self):
         #Triggered when new max is hit
-        if (len(self.SoCextremaList)-self.NdegradationCalculated)==1: #TODO ?
+        if (len(self.SoCextremaList)-self.NdegradationCalculated)==1:
             self.DoDmaxDegradation=0
             self.SoCmaxDegradation=0
             if self.charging:
@@ -108,7 +108,7 @@ class Cell:
 
     def updateESR(self):
         self.cellESR.R0multiplier=self.R0degradationParams[0] * math.exp(self.R0degradationParams[1] * (100-self.SoH[-1])) + 1
-        print("updated R0 multiplier=",self.cellESR.R0multiplier)
+        #print("updated R0 multiplier=",self.cellESR.R0multiplier)
         for i, parameters in enumerate(self.ZdegradationParams):
             self.cellESR.Zmultiplier[i]=parameters[0] * math.exp(parameters[1] * (100-self.SoH[-1])) + 1
             
@@ -123,17 +123,18 @@ class Cell:
         discharge=i*dt
         if discharge>0:
             # We are discharging
-            dSoC=100*discharge/(self.coulombEffeciency[-1]*(3.6*self.SoH[-1]*self.MaxCapacity/100))            
+            dSoC=100*discharge/(self.coulombEffeciency[-1]*(3.6*self.SoH[-1]*self.MaxCapacity/100))
+                        
         else:
             # We are charging
             dSoC=100*discharge/(3.6*self.SoH[-1]*self.MaxCapacity/100)
 
         if (self.SoC[-1]-dSoC)>=99 and i<0:
             self.charge=False
-            #print("Cannot charge anymore battery full. SoC",self.SoC," SoH=",self.SoH," time=",time)
+            #print("Cannot charge anymore battery full. SoC",self.SoC[-1]," SoH=",self.SoH[-1]," time=",time)
             return False
         elif (self.SoC[-1]-dSoC)<=1 and i>0:
-            #print("Cannot discharge anymore battery empty. SoC",self.SoC," SoH=",self.SoH," time=",time)
+            #print("Cannot discharge anymore battery empty. SoC",self.SoC[-1]," SoH=",self.SoH[-1]," time=",time)
             self.discharge=False
             return False
         else:
@@ -154,26 +155,32 @@ class Cell:
 
         if (self.SoC[-1]-dSoC)>=99 and i<0:
             self.charge=False
-            print("Cannot charge anymore battery full. SoC",self.SoC," SoH=",self.SoH," time=",time)
+            print("Cannot charge anymore battery full. SoC",self.SoC[-1]," SoH=",self.SoH[-1]," time=",time)
             return
         elif (self.SoC[-1]-dSoC)<=1 and i>0:
-            print("Cannot discharge anymore battery empty. SoC",self.SoC," SoH=",self.SoH," time=",time)
+            print("Cannot discharge anymore battery empty. SoC",self.SoC[-1]," SoH=",self.SoH[-1]," time=",time)
             self.discharge=False
             return
         else:
-            self.charge=True  #TODO should this be self.charging? compare with latest commit
-            self.discharge=True #TODO should this be self.discharging?
+            self.charge=True
+            self.discharge=True
         
         
         self.Temperature.append(Temperature)
         self.time.append(time)
         self.esr.append(self.cellESR.calculateESR(i,dt))
-        #TODO where is self.SoC get updated?
+        
         #print(dSoC)
+        self.charge-=dSoC
+        #print(self.charge)
+        self.SoC.append(self.SoC[-1]-dSoC)
+        self.ocv.append((self.ocvEstimator.output(100-self.SoC[-1],self.Temperature[-1]))*self.ocvSoH_gain())
+        self.voltage.append(self.ocv[-1]+i*self.esr[-1])
+        #print("True cell Soc=",self.SoC[-1]," OCV=", self.ocv[-1], " Voltage=",self.voltage[-1]," time=",time," ESR time=",self.cellESR.time)
         self.current.append(i)
         if self.charging:
             if (self.SoCLmax-self.SoC[-1])>self.SoCnoiseThreshold:
-                self.charging=0 #TODO charge vs charging again? is charge bool for safe to charge condition? and charging is state?
+                self.charging=0
                 self.SoCextremaList.append(self.SoCLmax)
                 self.SoCLmin=self.SoC[-1]
                 self.SoCdegradation()
@@ -181,7 +188,7 @@ class Cell:
                 self.SoCLmax=max(self.SoCLmax,self.SoC[-1])
         else:
             if (self.SoC[-1]-self.SoCLmin)>self.SoCnoiseThreshold:
-                self.charging=1 #TODO why not discharging?
+                self.charging=1
                 self.SoCextremaList.append(self.SoCLmin)
                 self.SoCLmax=self.SoC[-1]
                 self.SoCdegradation()
@@ -251,7 +258,7 @@ class Cell:
         ax.set_title(title)
         
         # Plot each cell with a different color
-        for i, cell in enumerate(self.cells): #TODO there's no cells attribute
+        for i, cell in enumerate(self.cells):
             # Get the data for each property
             try:
                 y_data = getattr(cell, y_property)
@@ -294,46 +301,47 @@ class Cell:
         
         return fig, ax
 
-'''
-cell1 = Cell("LiFePO4", corner="nom", seed=42)  # Random parameters with reproducibility
-cell2 = Cell("LiFePO4", corner="mc")  # Same seed will result in identical parameters
-cell3 = Cell("LiFePO4", corner="low")  # Same seed will result in identical parameters
-cell4 = Cell("LiFePO4", corner="high")  # Same seed will result in identical parameters
-'''
 
-R0=2e-3 #ohms
-RZlist=[[1e-3,10,0],[1.5e-3,1e4,0],[8,5e-7,1]]
-
-corners=["nom","low","high","mc",'mc',"mc",'mc',"mc"]
-#corners=['nom']
-battery=[]
-battery_model=[]
-for corner in corners:
-    battery.append(Cell("Li_Ion", R0, RZlist, corner=corner))
-                
-input_csv = 'test_sequence.csv'
-#input_csv = 'la92shortdds.csv'
-data = pd.read_csv(input_csv)
-offset=0
-time = data['Time'].values[offset:]
-current = data['Current'].values[offset:]
-temperature= data['Temperature'].values[offset:]
-charge=0
-for i, t in enumerate(time):
-    fuse=True
-    if i!=0:
-        for cell in battery:
-            fuse = fuse and cell.checkFuse(t,current[i]) 
-
-        if fuse:
+if __name__ == "__main__":
+    '''
+    cell1 = Cell("LiFePO4", corner="nom", seed=42)  # Random parameters with reproducibility
+    cell2 = Cell("LiFePO4", corner="mc")  # Same seed will result in identical parameters
+    cell3 = Cell("LiFePO4", corner="low")  # Same seed will result in identical parameters
+    cell4 = Cell("LiFePO4", corner="high")  # Same seed will result in identical parameters
+    '''
+    
+    R0=2e-3 #ohms
+    RZlist=[[1e-3,10,0],[1.5e-3,1e4,0],[8,5e-7,1]]
+    
+    corners=["nom","low","high","mc",'mc',"mc",'mc',"mc"]
+    #corners=['nom']
+    battery=[]
+    battery_model=[]
+    for corner in corners:
+        battery.append(Cell("Li_Ion", R0, RZlist, corner=corner))
+                    
+    input_csv = 'test_sequence.csv'
+    #input_csv = 'la92shortdds.csv'
+    data = pd.read_csv(input_csv)
+    offset=0
+    time = data['Time'].values[offset:]
+    current = data['Current'].values[offset:]
+    temperature= data['Temperature'].values[offset:]
+    charge=0
+    for i, t in enumerate(time):
+        fuse=True
+        if i!=0:
             for cell in battery:
-                cell(t,current[i],temperature[i])
-                
-        else:
-            print("protection fuse blown")
+                fuse = fuse and cell.checkFuse(t,current[i])
+    
+            if fuse:
+                for cell in battery:
+                    cell(t,current[i],temperature[i])                
+            else:
+                print("protection fuse blown")
+            
         
     
-
-
-for cell in battery:
-    print(cell)
+    
+    for cell in battery:
+        print(cell)
