@@ -135,3 +135,4 @@ for i, cell in enumerate(battery):
     plt.plot(P_values[i])
     plt.title('Covariance P Over Time')
     plt.xlabel('Time Step')
+    plt.show()
