@@ -28,7 +28,7 @@ class cellESR:
 
         
             
-    def ix_next(self,ix_previous, tau, i_new, dt):
+    def ix_next(self,ix_previous, tau, i_new, dt): #TODO whats going on here?
         # Using the equation: i1_next = previous_i1 + (new_i - previous_i1) * dt / tau
        ix_next = (ix_previous + i_new * dt / tau)/(1+dt/tau)
        if abs(ix_next)>abs(i_new):

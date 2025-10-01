@@ -57,7 +57,7 @@ class Cell:
             RZlist[index][0]=rc[0]*esrFactor
 
         self.cellESR=cellESR(R0,RZlist)
-        self.charge=0
+        self.charge=0 #TODO units? colomb? or remaining capacity in mAh? or bool?
         ocvLookup="Sample_OCV_DoD.csv"  # Path to the lookup table file
         self.ocvEstimator=LookupTableEstimator(ocvLookup)
         self.Temperature=[25]  # cell temperature in degree centigrade
@@ -73,7 +73,7 @@ class Cell:
         #Assuming Ro, RC list at 25C and 50% SoH we should scale accordingly
         self.esrEstimator=LookupTableEstimator(esrLookup)
         #Assuming Ro, RC list at 25C and 50% SoH we shouldscale accordingly
-        self.esrScaler=self.esrEstimator.output(100-self.SoC[-1],self.Temperature[-1])
+        self.esrScaler=self.esrEstimator.output(100-self.SoC[-1],self.Temperature[-1]) #TODO update
         # self.esrEstimator.output(DoD,Temperature) will look up the value vs. DoD and temperature
         self.effectiveCycles=0.0 # measures degradation
         self.charging=1
@@ -90,7 +90,7 @@ class Cell:
         
     def SoCdegradation(self):
         #Triggered when new max is hit
-        if (len(self.SoCextremaList)-self.NdegradationCalculated)==1:
+        if (len(self.SoCextremaList)-self.NdegradationCalculated)==1: #TODO ?
             self.DoDmaxDegradation=0
             self.SoCmaxDegradation=0
             if self.charging:
@@ -161,25 +161,19 @@ class Cell:
             self.discharge=False
             return
         else:
-            self.charge=True
-            self.discharge=True
+            self.charge=True  #TODO should this be self.charging? compare with latest commit
+            self.discharge=True #TODO should this be self.discharging?
         
         
         self.Temperature.append(Temperature)
         self.time.append(time)
         self.esr.append(self.cellESR.calculateESR(i,dt))
-        
+        #TODO where is self.SoC get updated?
         #print(dSoC)
-        self.charge-=dSoC
-        #print(self.charge)
-        self.SoC.append(self.SoC[-1]-dSoC)
-        self.ocv.append((self.ocvEstimator.output(100-self.SoC[-1],self.Temperature[-1]))*self.ocvSoH_gain())
-        self.voltage.append(self.ocv[-1]+i*self.esr[-1])
-        #print("True cell Soc=",self.SoC[-1]," OCV=", self.ocv[-1], " Voltage=",self.voltage[-1]," time=",time," ESR time=",self.cellESR.time)
         self.current.append(i)
         if self.charging:
             if (self.SoCLmax-self.SoC[-1])>self.SoCnoiseThreshold:
-                self.charging=0
+                self.charging=0 #TODO charge vs charging again? is charge bool for safe to charge condition? and charging is state?
                 self.SoCextremaList.append(self.SoCLmax)
                 self.SoCLmin=self.SoC[-1]
                 self.SoCdegradation()
@@ -187,7 +181,7 @@ class Cell:
                 self.SoCLmax=max(self.SoCLmax,self.SoC[-1])
         else:
             if (self.SoC[-1]-self.SoCLmin)>self.SoCnoiseThreshold:
-                self.charging=1
+                self.charging=1 #TODO why not discharging?
                 self.SoCextremaList.append(self.SoCLmin)
                 self.SoCLmax=self.SoC[-1]
                 self.SoCdegradation()
@@ -257,7 +251,7 @@ class Cell:
         ax.set_title(title)
         
         # Plot each cell with a different color
-        for i, cell in enumerate(self.cells):
+        for i, cell in enumerate(self.cells): #TODO there's no cells attribute
             # Get the data for each property
             try:
                 y_data = getattr(cell, y_property)
@@ -329,7 +323,7 @@ for i, t in enumerate(time):
     fuse=True
     if i!=0:
         for cell in battery:
-            fuse = fuse and cell.checkFuse(t,current[i])
+            fuse = fuse and cell.checkFuse(t,current[i]) 
 
         if fuse:
             for cell in battery:
