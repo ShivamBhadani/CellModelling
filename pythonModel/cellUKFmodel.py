@@ -130,7 +130,7 @@ class SoCUKFEstimator:
         deltaV=self.cellESR.calculateESR(self.variable_stats['I']['mean'],self.variable_stats['dt']['mean'])*self.variable_stats['I']['mean']
         #print("deltaV=",deltaV," time=",self.cellESR.time)
         self.R=self.vNoise**2+self.dOCV**2+(self.dZ**2)*abs(deltaV)
-        predicted_measurements = [self.socEstimator.output(100*(1-sp),self.variable_stats['T']['mean'])+deltaV for sp in sigma_points]
+        predicted_measurements = [self.socEstimator.estimateOCV(100*(1-sp),self.variable_stats['T']['mean'])+deltaV for sp in sigma_points]
         
         if (max(sigma_points)<1) and (min(sigma_points)>0):
             z_pred = np.dot(weights, predicted_measurements)/np.sum(weights)
