@@ -18,7 +18,7 @@ class cellESR:
         for RZ in RZlist:
             if RZ[2]==0:
                 self.RTlist.append([RZ[0],RZ[0]*RZ[1],0,0])
-                self.esrDC+=RZ[0] #TODO adding R in RC but skipping R in L/R?
+                self.esrDC+=RZ[0] 
             else:
                 self.RTlist.append([RZ[0],RZ[1]/RZ[0],1,0])
         self.esr=R0
@@ -59,7 +59,7 @@ class cellESR:
                 dV+=r*self.RTlist[index][3]
         return dV
     
-class LookupTableEstimator:
+class LookupTableEstimator: #TODO older implementation is a lot faster
     def __init__(self, file_path):
         # Load the lookup table once during initialization
         self.lookup_table = pd.read_csv(file_path)
@@ -76,3 +76,34 @@ class LookupTableEstimator:
         outputs_at_temperatures = input_func(input_value)
         temp_func = interp1d(self.temperatures, outputs_at_temperatures, fill_value="extrapolate")
         return temp_func(temperature)
+
+# class LookupTableEstimator:
+#     def __init__(self, file_path):
+#         self.lookup_table = pd.read_csv(file_path)
+
+#         headers = self.lookup_table.columns.tolist()
+#         self.DoD_vector = self.lookup_table[headers[0]].values
+#         self.temperature_vector = [int(header.split(" ")[-1][:-1]) for header in headers[1:]]
+#         self.OCV_grid = self.lookup_table.iloc[:, 1:].values
+
+#     def estimateOCV(self, dod, temperature):
+#         # Interpolate OCV at each DoD for the given temperature
+#         ocv_at_dod = []
+#         for row in self.OCV_grid:
+#             temp_interp = interp1d(self.temperature_vector, row, bounds_error=False, fill_value="extrapolate")
+#             ocv_at_dod.append(temp_interp(temperature))
+
+#         # Interpolate OCV from DoD
+#         dod_interp = interp1d(self.DoD_vector, ocv_at_dod, bounds_error=False, fill_value="extrapolate")
+#         return float(dod_interp(dod))
+
+#     def get_dod(self, ocv, temperature):
+#         # Interpolate OCV at each DoD for the given temperature
+#         ocv_at_dod = []
+#         for row in self.OCV_grid:
+#             temp_interp = interp1d(self.temperature_vector, row, bounds_error=False, fill_value="extrapolate")
+#             ocv_at_dod.append(temp_interp(temperature))
+
+#         # Interpolate DoD from OCV
+#         ocv_interp = interp1d(ocv_at_dod, self.DoD_vector, bounds_error=False, fill_value="extrapolate")
+#         return float(ocv_interp(ocv))
