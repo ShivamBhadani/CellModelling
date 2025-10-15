@@ -26,7 +26,7 @@ class Cell:
         self.ocv=[self.ocvEstimator.estimateOCV(100-self.SoC[-1],self.Temperature[-1])] # initial OCV given temp and DoD
         self.voltage=[self.ocv[-1]+self.current[-1]*self.esr[-1]] # initial voltage
         self.time=[0]          # keep track of time
-        self.coulombEffeciency=[0.95]
+        self.coulombEffeciency=[1]
         self.SoCLmax=0
         self.SoCLmin=100
         self.SoCnoiseThreshold=0.5 # threshold to determine if we are in charging or discharging mode
@@ -114,7 +114,7 @@ class Cell:
         if(not self.checkFuse(time,i)):
             print("protection fuse blown, run simulation with zero current , current=", i, " SoC=", self.SoC[-1])
             i=0
-            return
+            return                                             
         
         self.Temperature.append(Temperature)
         self.time.append(time)
