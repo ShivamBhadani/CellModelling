@@ -26,7 +26,7 @@ class Cell:
         self.ocv=[self.ocvEstimator.estimateOCV(100-self.SoC[-1],self.Temperature[-1])] # initial OCV given temp and DoD
         self.voltage=[self.ocv[-1]+self.current[-1]*self.esr[-1]] # initial voltage
         self.time=[0]          # keep track of time
-        self.coulombEffeciency=[1]
+        self.coulombEffeciency=[0.97]
         self.SoCLmax=0
         self.SoCLmin=100
         self.SoCnoiseThreshold=0.5 # threshold to determine if we are in charging or discharging mode
@@ -53,7 +53,7 @@ class Cell:
             esrFactor = np.random.normal(1, 0.03)
             self.SoH = [min(100,np.random.normal(95.0, 1))]
             self.SoC = [min(100,np.random.normal(95.0, 1))]
-            self.coulombEffeciency=[min(95,np.random.normal(90.0, 1))]
+            self.coulombEffeciency=[min(0.95,np.random.normal(0.90, 0.05))]
         else:
             #we are at nominal
             esrFactor = 1
@@ -96,7 +96,7 @@ class Cell:
         elif not self.charging and self.SoCLmax>20:
             #SoCMax just got calculated
             self.SoCmaxDegradation=(1/1000)*(50/(90*90))*((self.SoCLmax)**2)
-        self.updateSoH()
+        # self.updateSoH()
            
     def ocvSoH_gain(self):
         return 1+((100-self.SoH[-1])/15000)*(self.SoC[-1]-50)
@@ -104,6 +104,10 @@ class Cell:
     def __call__(self,time,i, Temperature):
         dt= time - self.time[-1]
         discharge=i*dt
+        if(not self.checkFuse(time,i)):
+            print("protection fuse blown, run simulation with zero current , current=", i, " SoC=", self.SoC[-1])
+            i=0
+            return                                             
         if discharge>0:
             # We are discharging
             dSoC=100*discharge/(self.coulombEffeciency[-1]*(3.6*self.SoH[-1]*self.MaxCapacity/100))            
@@ -111,10 +115,6 @@ class Cell:
             # We are charging
             dSoC=100*discharge/(3.6*self.SoH[-1]*self.MaxCapacity/100)
 
-        if(not self.checkFuse(time,i)):
-            print("protection fuse blown, run simulation with zero current , current=", i, " SoC=", self.SoC[-1])
-            i=0
-            return                                             
         
         self.Temperature.append(Temperature)
         self.time.append(time)
