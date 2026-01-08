@@ -1,8 +1,8 @@
-$
+![eq](https://render.githubusercontent.com/render/math?math=
 z_{k+1}=z_k-\frac{\eta{i_k}\Delta{t}}{Q}+w_k\\
 v_k=OCV{(z_k)}-i_kR+v_k\\$<br>
+)
 
-$
 \begin{array}{lccccc}
 \hline\rule{0pt}{3.5ex} \text { Method } & \gamma & \alpha_0^{(\mathrm{m})} & \alpha_k^{(\mathrm{m})} & \alpha_0^{(\mathrm{c})} & \alpha_k^{(\mathrm{c})} \\
 \text { CDKF } & h & \frac{h^2-L}{h^2} & \frac{1}{2 h^2} & \frac{h^2-L}{h^2} & \frac{1}{2 h^2}\rule[-2ex]{0pt}{5ex}\\
