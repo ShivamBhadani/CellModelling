@@ -19,11 +19,13 @@ class Cell:
         self.cellESR=cellESR(R0,RZlist)
         self.charge=0 # denotes readiness to charge
         ocvLookup="Sample_OCV_DoD.csv"  # Path to the lookup table file
+        ocvLookup="Sample_OCV_SoC_1.0pct_10deg.csv"  # Path to the lookup table file
         self.ocvEstimator=LookupTableEstimator(ocvLookup)
         self.Temperature=[25]  # cell temperature in degree centigrade
         self.current=[0]   # cell current positive means discharge negative means charging
         self.esr=[self.cellESR.esrDC] 
-        self.ocv=[self.ocvEstimator.estimateOCV(100-self.SoC[-1],self.Temperature[-1])] # initial OCV given temp and DoD
+        # self.ocv=[self.ocvEstimator.estimateOCV(100-self.SoC[-1],self.Temperature[-1])] # initial OCV given temp and DoD
+        self.ocv=[self.ocvEstimator.estimateOCV(self.SoC[-1],self.Temperature[-1])] # initial OCV given temp and DoD
         self.voltage=[self.ocv[-1]+self.current[-1]*self.esr[-1]] # initial voltage
         self.time=[0]          # keep track of time
         self.coulombEffeciency=[0.97]
@@ -120,7 +122,8 @@ class Cell:
         self.time.append(time)
         self.esr.append(self.cellESR.calculateESR(i,dt))
         self.SoC.append(self.SoC[-1]-dSoC)
-        self.ocv.append((self.ocvEstimator.estimateOCV(100-self.SoC[-1],self.Temperature[-1]))*self.ocvSoH_gain())
+        # self.ocv.append((self.ocvEstimator.estimateOCV(100-self.SoC[-1],self.Temperature[-1]))*self.ocvSoH_gain())
+        self.ocv.append((self.ocvEstimator.estimateOCV(self.SoC[-1],self.Temperature[-1]))*self.ocvSoH_gain())
         self.voltage.append(self.ocv[-1]+i*self.esr[-1])
         self.current.append(i)
         if self.charging:

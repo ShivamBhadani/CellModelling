@@ -1,20 +1,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include "cellESR.h"
 
-// Maximum number of RZ elements for embedded systems
+// max number of RZ elements for embedded systems
 #define MAX_RZ_ELEMENTS 20
 
 // Structure for cellESR class
 struct cellESR {
-    // Basic parameters
+    // basic params
     double R0;
     double R0multiplier;
     double esrDC;
     double deltaV;
     int time;
     
-    // Arrays for RZ elements
+    // arrays for RZ elements
     double R_values[MAX_RZ_ELEMENTS];
     double tau_values[MAX_RZ_ELEMENTS];
     int indices[MAX_RZ_ELEMENTS];
@@ -23,33 +24,18 @@ struct cellESR {
     
 };
 
-// Export functions for shared library
+// for shared library
 #ifdef _WIN32
     #define EXPORT __declspec(dllexport)
 #else
     #define EXPORT
 #endif
 
-// Function prototypes with EXPORT
-EXPORT cellESR_t* cellESR_create(double R0, double* RZlist_flat, int num_RZ);
-EXPORT void cellESR_destroy(cellESR_t* cell);
-EXPORT double cellESR_calculateDeltaV(cellESR_t* cell, double i_new, double dt);
-EXPORT double cellESR_get_R0(cellESR_t* cell);
-EXPORT double cellESR_get_esrDC(cellESR_t* cell);
-EXPORT int cellESR_get_time(cellESR_t* cell);
-EXPORT double cellESR_get_deltaV(cellESR_t* cell);
-EXPORT int cellESR_get_num_elements(cellESR_t* cell);
-EXPORT void cellESR_get_R_values(cellESR_t* cell, double* output);
-EXPORT void cellESR_get_tau_values(cellESR_t* cell, double* output);
-EXPORT void cellESR_get_indices(cellESR_t* cell, int* output);
-EXPORT void cellESR_get_ix_values(cellESR_t* cell, double* output);
-
 // Create and initialize cellESR structure
 EXPORT cellESR_t* cellESR_create(double R0, double* RZlist_flat, int num_RZ) {
     cellESR_t* cell = (cellESR_t*)malloc(sizeof(cellESR_t));
     if (!cell) return NULL;
     
-    // Initialize basic parameters
     cell->R0 = R0;
     cell->R0multiplier = 1.0;
     cell->esrDC = R0;
@@ -176,3 +162,32 @@ EXPORT void cellESR_get_ix_values(cellESR_t* cell, double* output) {
         }
     }
 }
+
+#ifdef ESRTEST
+int main() {
+    // Example usage of cellESR
+    double R0 = 0.015; // 15 mOhm
+    double RZlist[] = {
+        1.0e-3, 10, 0,   // R1, Z1, type0
+        1.5e-3, 1e4, 0     // R2, Z2, type1
+    };
+    int num_RZ = 2;
+    
+    cellESR_t* esr_model = cellESR_create(R0, RZlist, num_RZ);
+    if (!esr_model) {
+        printf("failed to create acellESR model\n");
+        return -1;
+    }
+    
+    double current = 12.49; // 10 A discharge
+    double dt = 1.0;       // 1 second time step
+    
+    for (int t = 0; t < 10; t++) {
+        double deltaV = cellESR_calculateDeltaV(esr_model, current, dt);
+        printf("Time: %d s, Delta V: %.4f V\n", t+1, deltaV);
+    }
+    
+    cellESR_destroy(esr_model);
+    return 0;
+}
+#endif
