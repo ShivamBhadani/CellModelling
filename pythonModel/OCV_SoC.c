@@ -3,9 +3,15 @@
 #include <string.h>
 #include <math.h>
 #include "OCV_SoC.h"
-
+#ifndef HOSTED
+#include "lfs.h"
+extern lfs_t lfs;
+extern struct lfs_config cfg;
+#endif
 #define SOC_POINTS 101  // SoC from 0 to 100 in 1% increments
 #define TEMP_POINTS 14  // Temperature from -40 to 90 in 10°C steps
+
+
 
 // Temperature array: -40, -30, -20, -10, 0, 10, 20, 30, 40, 50, 60, 70, 80, 90
 static const double temperatures[TEMP_POINTS] = {
@@ -17,29 +23,53 @@ static double ocv_table[SOC_POINTS][TEMP_POINTS];
 static int table_initialized = 0;
 
 int load_ocv_data(const char* filename) {
+#ifdef HOSTED
     FILE *file = fopen(filename, "r");
-    if (!file) {
+#else
+	lfs_file_t file;
+	static struct lfs_file_config file_cfg={0};
+    int err=lfs_file_opencfg(&lfs,&file,filename,LFS_O_RDONLY,&file_cfg);
+    if(!err)
+        printf("Opened OCV file %s\n",filename);
+#endif
+
+    if (err) {
         printf("Error: Cannot open file %s\n", filename);
         return -1;
     }
 
-    char line[2048];
+    char line[256];
     int row = 0;
 
     // Skip header line
+#ifdef HOSTED
     if (fgets(line, sizeof(line), file) == NULL) {
         fclose(file);
         return -1;
     }
-
+#else
+    int n=0;
+    if(n = lfs_file_read(&lfs,&file,&line,sizeof(line)-1)){
+    	if(n<=0)
+    		lfs_file_close(&lfs,&file);
+    	char delim='\n';
+    	char *buf=strtok(line,&delim);
+    }
+#endif
+#ifdef HOSTED
     // Read data lines
     while (fgets(line, sizeof(line), file) && row < SOC_POINTS) {
+#else
+    	while(n=lfs_file_read(&lfs,&file,&line,sizeof(line))){
+    		if(n<=0)
+    			lfs_file_close(&lfs,&file);
+#endif
         char *token = strtok(line, ",");
         int col = 0;
 
         // Skip SoC column (first column)
         token = strtok(NULL, ",");
-        
+
         // Read OCV values for each temperature
         while (token && col < TEMP_POINTS) {
             ocv_table[100-row][col] = atof(token);  // SoC decreases in CSV (100 to 0)
@@ -48,13 +78,16 @@ int load_ocv_data(const char* filename) {
         }
         row++;
     }
-
+#ifdef HOSTED
     fclose(file);
+#else
+    lfs_file_close(&lfs,&file);
+#endif
     table_initialized = 1;
     return 0;
 }
 
-void find_interpolation_params(double value, const double* array, int size, 
+void find_interpolation_params(double value, const double* array, int size,
                               int* lower_idx, int* upper_idx, double* weight) {
     // Handle boundary cases
     if (value <= array[0]) {
@@ -63,7 +96,7 @@ void find_interpolation_params(double value, const double* array, int size,
         *weight = 0.0;
         return;
     }
-    
+
     if (value >= array[size-1]) {
         *lower_idx = size-1;
         *upper_idx = size-1;
@@ -161,7 +194,7 @@ int main() {
     for (int i = 0; i < 5; i++) {
         for (int j = 0; j < 6; j++) {
             double ocv = get_ocv_bilinear(test_socs[i], test_temps[j]);
-            printf("SoC: %6.1f%%, Temp: %6.1f°C -> OCV: %7.4f V\n", 
+            printf("SoC: %6.1f%%, Temp: %6.1f°C -> OCV: %7.4f V\n",
                    test_socs[i], test_temps[j], ocv);
         }
     }
@@ -174,4 +207,4 @@ int main() {
 
     return 0;
 }
-#endif 
+#endif

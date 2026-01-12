@@ -1,10 +1,19 @@
 #include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
 #include "cellUKF.h"
 #include "cellESR.h"
 #include "OCV_SoC.h"
+#include "lfs.h"
+#include "lfs_image.h"
+
+#ifndef HOSTED
+
+lfs_t lfs;
+struct lfs_config cfg;
+#endif
 
 // UKF Parameters
 #define Nx 1         // Number of states (SoC)
@@ -34,7 +43,11 @@ static cellESR_t* esr_model = NULL;
 static int ocv_initialized = 0;
 
 // CSV logging
+#ifdef HOSTED
 static FILE* csv_file = NULL;
+#else
+static lfs_file_t csv_file ;
+#endif
 static double ocvSoH_gain_factor = 1.0;  // Battery OCV SoH gain factor
 
 /**
@@ -88,36 +101,59 @@ int init_ukf_system(const char* ocv_file) {
 }
 
 int init_csv_logging(const char* filename) {
+    #ifdef HOSTED
     csv_file = fopen(filename, "w");
-    if (!csv_file) {
+    #else
+    static struct lfs_file_config file_cfg={0};
+    int err=lfs_file_opencfg(&lfs,&csv_file,filename,LFS_O_WRONLY | LFS_O_CREAT, &file_cfg);
+    #endif
+    if (err) {
         printf("Error: Cannot create CSV file %s\n", filename);
         return -1;
     }
     
     // Write CSV header
+    #ifdef HOSTED
     fprintf(csv_file, "time,soc_true,soc_estimate,covariance,voltage_measurement,current,temperature\n");
+    #else
+    lfs_file_write(&lfs,&csv_file,"time,soc_true,soc_estimate,covariance,voltage_measurement,current,temperature\n", strlen("time,soc_true,soc_estimate,covariance,voltage_measurement,current,temperature\n"));
+    #endif
     return 0;
 }
 
 void log_to_csv(double time, double soc_true, double soc_estimate, double covariance, 
                double voltage, double current, double temperature) {
+#ifdef HOSTED
     if (csv_file) {
         fprintf(csv_file, "%.1f,%.6f,%.6f,%.8f,%.6f,%.3f,%.1f\n", 
                 time, soc_true, soc_estimate, covariance, voltage, current, temperature);
         fflush(csv_file);  // Ensure data is written immediately
     }
+    
+#else
+    if(&csv_file) {
+        char buffer[256];
+        lfs_file_t csv_file;
+        int len = snprintf(buffer, sizeof(buffer), "%.1f,%.6f,%.6f,%.8f,%.6f,%.3f,%.1f\n", 
+                time, soc_true, soc_estimate, covariance, voltage, current, temperature);
+        lfs_file_write(&lfs,&csv_file,buffer,len);
+    }
+#endif
 }
-
 
 void cleanup_ukf_system(void) {
     if (esr_model) {
         cellESR_destroy(esr_model);
         esr_model = NULL;
     }
+    #ifdef HOSTED
     if (csv_file) {
         fclose(csv_file);
         csv_file = NULL;
     }
+    //#else
+     //   lfs_file_close(&lfs,&csv_file);
+    #endif
 }
 
 double ukf_step(double current, double voltage_measurement, double temperature, 
@@ -262,49 +298,169 @@ double ukf_step(double current, double voltage_measurement, double temperature,
     return xhat_plus;
 }
 
+#ifndef HOSTED
+#define SIZE 49152
+#define FS_SIZE  SIZE   // 395 KB in your case
+uint8_t flash_sim[SIZE];
+
+void load_fs_image(void) {
+    memcpy(flash_sim, lfs_bin,SIZE );  // copy header bytes into RAM
+}
+
+static int bd_read(const struct lfs_config *c,
+                   lfs_block_t block, lfs_off_t off,
+                   void *buffer, lfs_size_t size)
+{
+    memcpy(buffer, &flash_sim[block * c->block_size + off], size);
+    return 0;
+}
+
+static int bd_prog(const struct lfs_config *c,
+                   lfs_block_t block, lfs_off_t off,
+                   const void *buffer, lfs_size_t size)
+{
+    uint8_t *dst = &flash_sim[block * c->block_size + off];
+    const uint8_t *src = buffer;
+    for (lfs_size_t i = 0; i < size; i++) dst[i] &= src[i]; // emulate flash 1->0
+    return 0;
+}
+
+static int bd_erase(const struct lfs_config *c, lfs_block_t block)
+{
+    memset(&flash_sim[block * c->block_size], 0xFF, c->block_size);
+    return 0;
+}
+
+static int bd_sync(const struct lfs_config *c) { return 0; }
+
+
+void mount_fs(void) {
+//    memset(&cfg, 0, sizeof(cfg));
+	printf("during mount lfs\n");
+    cfg.read  = bd_read;
+    cfg.prog  = bd_prog;
+    cfg.erase = bd_erase;
+    cfg.sync  = bd_sync;
+
+    cfg.read_size      = 16;
+    cfg.prog_size      = 16;
+    cfg.block_size     = 4096;
+    cfg.block_cycles   = -1;
+    cfg.block_count    = SIZE/4096;
+    cfg.cache_size     = 256;
+    cfg.lookahead_size = 16;
+    cfg.compact_thresh = -1;
+
+    printf("just before lfs_mount()\n");
+    if (lfs_mount(&lfs, &cfg)) {
+        printf("LittleFS mount failed!\n");
+    } else {
+        printf("Mounted RAM-backed filesystem!\n");
+    }
+}
+
+
+#endif
+
 #ifdef UKFTEST
 int main() {
+    #ifndef HOSTED
+    load_fs_image();
+    mount_fs();
+    #endif
     
     // Initialize system
     if (init_ukf_system("Sample_OCV_SoC_1.0pct_10deg.csv") != 0) {
         printf("Failed to initialize UKF system\n");
         return -1;
     }
-    
+
+    #ifdef HOSTED
     FILE* py_csv = fopen("ytrue_UKF_5hr_10s.csv", "r");
+    #else
+    lfs_file_t py_csv;
+    static struct lfs_file_config file_cfg={0};
+    int err=lfs_file_opencfg(&lfs,&py_csv,"ytrue_UKF_5hr_10s.csv",LFS_O_RDONLY,&file_cfg);
+    if(err){
+        printf("Error: Cannot open file ytrue_UKF_5hr_10s.csv\n");
+        return -1;
+    }
+    #endif
+#ifdef HOSTED
     if (py_csv) {
-        printf("Python results file found. Running test.\n");
+#else
+    if(!err){
+#endif
+    printf("Python results file found. Running test.\n");
         double soc_estimate = 100.0;
         double state_covariance = 1.0;
         double current = 12.49;
         double temperature = 25.0;
         double dt = 1.0;
         int max_iterations = 1000;
-        
-        FILE* csv = fopen("ukf_c_results.csv", "w");
+        #ifdef HOSTED
+        FILE* csv = fopen("ukf_PY_C_results.csv", "w");
+    
         fprintf(csv, "time,Csoc_estimate\n");
         fprintf(csv, "0.0,%.6f\n", soc_estimate);
+        #else
+        lfs_file_t csv;
+        static struct lfs_file_config file_cfg={0};
+        int err=lfs_file_opencfg(&lfs,&csv,"UKF_PY_C_results.csv",LFS_O_WRONLY | LFS_O_CREAT, &file_cfg);
+        char buffer[256];
+        int len = snprintf(buffer, sizeof(buffer), "time,Csoc_estimate\n");
+        lfs_file_write(&lfs,&csv,buffer,len);
+        len = snprintf(buffer, sizeof(buffer), "0.0,%.6f\n", soc_estimate);
+        lfs_file_write(&lfs,&csv,buffer,len);
+        #endif
         double voltage_measurement[max_iterations];
         char line[256];
+        #ifdef HOSTED
             fgets(line, sizeof(line), py_csv); // Skip header
+        #else
+            int n=0;
+            if(n = lfs_file_read(&lfs,&py_csv,&line,sizeof(line)-1)){
+            	if(n<=0)
+            		lfs_file_close(&lfs,&py_csv);
+        	    char delim='\n';
+        	    char *buf=strtok(line,&delim);
+            }
+        #endif
         for(int iter=0; iter<max_iterations; iter++) {
+            #ifdef HOSTED
             fgets(line, sizeof(line), py_csv); // Placeholder for actual measurement generation
+            #else
+            n=0;
+            if(n = lfs_file_read(&lfs,&py_csv,&line,sizeof(line)-1)){
+            	if(n<=0)
+            		lfs_file_close(&lfs,&py_csv);
+        	    char delim='\n';
+        	    char *buf=strtok(line,&delim);
+            }
+            #endif
             voltage_measurement[iter] = strtod(line, NULL);
         }
         for (int k = 0; k < max_iterations && soc_estimate > 1.1; k++) {
             ukf_step(current, voltage_measurement[k], temperature, dt, &soc_estimate, &state_covariance);
-            fprintf(csv, "%d,%.6f\n", (int)(k+1), soc_estimate);
+        #ifdef HOSTED
+            fprintf(csv, "%.1f,%.6f\n", (k+1)*dt, soc_estimate);
+        #else
+            len = snprintf(buffer, sizeof(buffer), "%.1f,%.6f\n", (k+1)*dt, soc_estimate);
+            lfs_file_write(&lfs,&csv,buffer,len);
+        #endif
         }
-        fclose(csv);
-        printf("Results saved to ukf_c_results.csv\n");
-        cleanup_ukf_system();
+        }
+
+        printf("Results saved to UKF_PY_C_results.csv\n");
+
+        #ifdef HOSTED
         fclose(py_csv);
+        // lfs_file_close(&lfs,&py_csv);
+        #endif
+        cleanup_ukf_system();
         
-    }
-    else {
-        printf("file not found\n");
-    }
-    return 0;
+    
+        return 0;
 
 }
 #endif 
