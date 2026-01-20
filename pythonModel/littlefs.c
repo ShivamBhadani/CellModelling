@@ -1,19 +1,20 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include "lfs_image.h"
 
 // Define before including lfs.h to disable malloc (critical for embedded)
 #define LFS_NO_MALLOC
 
 #include "lfs.h"
-
+#define SIZE   49152  // 480 KB
 #define BLOCK_SIZE      4096
-#define BLOCK_COUNT     4
+#define BLOCK_COUNT     12
 #define CACHE_SIZE      256
 #define LOOKAHEAD_SIZE  16
 #define IMAGE_SIZE      (BLOCK_SIZE * BLOCK_COUNT)
 
-uint8_t flash[IMAGE_SIZE];  // RAM-backed "flash"
+uint8_t flash[SIZE];  // RAM-backed "flash"
 
 // Static buffers for embedded (avoids malloc)
 // Must be 4-byte aligned for ARM Cortex-M
@@ -42,6 +43,9 @@ static int bd_erase(const struct lfs_config *c, lfs_block_t block) {
 }
 
 static int bd_sync(const struct lfs_config *c) { return 0; }
+void load_fs_image(void) {
+    memcpy(flash, lfs_bin,SIZE );  // copy header bytes into RAM
+}
 
 // -------------------- Main workflow --------------------
 int main(void) {
@@ -74,6 +78,7 @@ int main(void) {
     printf("Filesystem formatted in RAM\n");
 
     // Mount it
+    load_fs_image();
     if (lfs_mount(&lfs, &cfg) != 0) {
         printf("Failed to mount LittleFS!\n");
         return 1;
@@ -84,33 +89,58 @@ int main(void) {
     static lfs_file_t file;          // Static - lfs_file_t is large
     static struct lfs_file_config file_cfg = {0};
     file_cfg.buffer = file_buffer;   // Static buffer for file ops
-    
-    if (lfs_file_opencfg(&lfs, &file, "csv1.csv", 
-            LFS_O_WRONLY | LFS_O_CREAT, &file_cfg) != 0) {
-        printf("Failed to create CSV file\n");
-        return 1;
-    }
+    char buffer[128];
+    // if (lfs_file_opencfg(&lfs, &file, "csv1.csv", 
+            // LFS_O_WRONLY | LFS_O_CREAT, &file_cfg) != 0) {
+        // printf("Failed to create CSV file\n");
+        // return 1;
+    // }
+   	if(lfs_file_opencfg(&lfs,&file,"ytrue_UKF_5hr_10s.csv",LFS_O_RDONLY,&file_cfg)==0){
+			printf("file opened suxxexfully\n");
+			char buf[64];
+			lfs_ssize_t n;
+            // fread(buffer, sizeof(char), 128, &file);
+            printf("%s",buffer);
+//			fgets(buf, sizeof(buf),&file);
+                // char delim='\n';
+                // strtok(buf,&delim);
+				// printf("%s",buf);
+                char *tok;
+			while((n=lfs_file_read(&lfs,&file,&buf,sizeof(buf)-1))>0){
+				// buf[n]='\0';
+                char delim='\n';
+                tok=strtok(buf,&delim);
+                printf("%s",buf);
+                while((tok=strtok(NULL,&delim))!=NULL){
+                    printf("\n%s",tok);
+                }
+				// printf("%s",tok);
+                // printf("%s\n",buf);
+			}
+			lfs_file_close(&lfs,&file);
+//
+		}
 
-    const char *csv_data = "header1,header2,header3\n1,2,3\n";
-    lfs_file_write(&lfs, &file, csv_data, strlen(csv_data));
-    lfs_file_close(&lfs, &file);
-    printf("CSV file written\n");
+
+else{
+    printf("Could not open file\n");
+}
 
     // Unmount filesystem
     lfs_unmount(&lfs);
 
     // Dump RAM image to a header
-    FILE *f = fopen("lfs_image.h", "w");
-    if (!f) return 1;
+    // FILE *f = fopen("lfs_image.h", "w");
+    // if (!f) return 1;
 
-    fprintf(f, "unsigned char lfs_bin[%d] = {", IMAGE_SIZE);
-    for (int i = 0; i < IMAGE_SIZE; i++) {
-        if (i % 12 == 0) fprintf(f, "\n    ");
-        fprintf(f, "0x%02X,", flash[i]);
-    }
-    fprintf(f, "\n};\n");
-    fclose(f);
+    // fprintf(f, "unsigned char lfs_bin[%d] = {", IMAGE_SIZE);
+    // for (int i = 0; i < IMAGE_SIZE; i++) {
+        // if (i % 12 == 0) fprintf(f, "\n    ");
+        // fprintf(f, "0x%02X,", flash[i]);
+    // }
+    // fprintf(f, "\n};\n");
+    // fclose(f);
 
-    printf("Header lfs_image.h written (%d bytes)\n", IMAGE_SIZE);
+    // printf("Header lfs_image.h written (%d bytes)\n", IMAGE_SIZE);
     return 0;
 }

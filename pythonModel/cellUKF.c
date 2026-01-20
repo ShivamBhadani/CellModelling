@@ -107,10 +107,7 @@ int init_csv_logging(const char* filename) {
     static struct lfs_file_config file_cfg={0};
     int err=lfs_file_opencfg(&lfs,&csv_file,filename,LFS_O_WRONLY | LFS_O_CREAT, &file_cfg);
     #endif
-    if (err) {
-        printf("Error: Cannot create CSV file %s\n", filename);
-        return -1;
-    }
+    
     
     // Write CSV header
     #ifdef HOSTED
@@ -386,11 +383,7 @@ int main() {
         return -1;
     }
     #endif
-#ifdef HOSTED
-    if (py_csv) {
-#else
-    if(!err){
-#endif
+
     printf("Python results file found. Running test.\n");
         double soc_estimate = 100.0;
         double state_covariance = 1.0;
@@ -398,64 +391,98 @@ int main() {
         double temperature = 25.0;
         double dt = 1.0;
         int max_iterations = 1000;
-        #ifdef HOSTED
         FILE* csv = fopen("ukf_PY_C_results.csv", "w");
-    
+        
         fprintf(csv, "time,Csoc_estimate\n");
-        fprintf(csv, "0.0,%.6f\n", soc_estimate);
-        #else
-        lfs_file_t csv;
-        static struct lfs_file_config file_cfg={0};
-        int err=lfs_file_opencfg(&lfs,&csv,"UKF_PY_C_results.csv",LFS_O_WRONLY | LFS_O_CREAT, &file_cfg);
-        char buffer[256];
-        int len = snprintf(buffer, sizeof(buffer), "time,Csoc_estimate\n");
-        lfs_file_write(&lfs,&csv,buffer,len);
-        len = snprintf(buffer, sizeof(buffer), "0.0,%.6f\n", soc_estimate);
-        lfs_file_write(&lfs,&csv,buffer,len);
+        fprintf(csv, "0,%.6f\n", soc_estimate);
+        #ifdef HOSTED
+        // #else
+        // lfs_file_t csv;
+        // static struct lfs_file_config file_cfg={0};
+        // err=lfs_file_opencfg(&lfs,&csv,"UKF_PY_C_results.csv",LFS_O_WRONLY | LFS_O_CREAT, &file_cfg);
+        // char buffer[256];
+        // int len = snprintf(buffer, sizeof(buffer), "time,Csoc_estimate\n");
+        // lfs_file_write(&lfs,&csv,buffer,len);
+        // len = snprintf(buffer, sizeof(buffer), "0.0,%.6f\n", soc_estimate);
+        // lfs_file_write(&lfs,&csv,buffer,len);
         #endif
         double voltage_measurement[max_iterations];
-        char line[256];
+        char buf[256];
+        char line[512];
+        int line_len = 0;
+        int count = 0;
+        int skip_header = 1;
+
         #ifdef HOSTED
-            fgets(line, sizeof(line), py_csv); // Skip header
+        size_t n = 0;
+        while ((n = fread(buf, 1, sizeof(buf), py_csv)) > 0 && count < max_iterations) {
+            for (size_t i = 0; i < n && count < max_iterations; i++) {
+                if (buf[i] == '\n') {
+                    line[line_len] = '\0';
+                    if (skip_header) {
+                        skip_header = 0;
+                    } else if (line_len > 0) {
+                        voltage_measurement[count] = strtod(line, NULL);
+                        // printf("parsed[%d]=%.6f\n", count, voltage_measurement[count]);
+                        count++;
+                    }
+                    line_len = 0;
+                } else if (line_len < (int)sizeof(line) - 1) {
+                    line[line_len++] = buf[i];
+                }
+            }
+        }
         #else
-            int n=0;
-            if(n = lfs_file_read(&lfs,&py_csv,&line,sizeof(line)-1)){
-            	if(n<=0)
-            		lfs_file_close(&lfs,&py_csv);
-        	    char delim='\n';
-        	    char *buf=strtok(line,&delim);
+        int n = 0;
+        while ((n = lfs_file_read(&lfs, &py_csv, buf, sizeof(buf))) > 0 && count < max_iterations) {
+            for (int i = 0; i < n && count < max_iterations; i++) {
+                if (buf[i] == '\n') {
+                    line[line_len] = '\0';
+                    if (skip_header) {
+                        skip_header = 0;
+                    } else if (line_len > 0) {
+                        voltage_measurement[count] = strtod(line, NULL);
+                        // printf("parsed[%d]=%.6f\n", count, voltage_measurement[count]);
+                        count++;
+                    }
+                    line_len = 0;
+                } else if (line_len < (int)sizeof(line) - 1) {
+                    line[line_len++] = buf[i];
+                }
             }
+        }
         #endif
-        for(int iter=0; iter<max_iterations; iter++) {
-            #ifdef HOSTED
-            fgets(line, sizeof(line), py_csv); // Placeholder for actual measurement generation
-            #else
-            n=0;
-            if(n = lfs_file_read(&lfs,&py_csv,&line,sizeof(line)-1)){
-            	if(n<=0)
-            		lfs_file_close(&lfs,&py_csv);
-        	    char delim='\n';
-        	    char *buf=strtok(line,&delim);
-            }
-            #endif
-            voltage_measurement[iter] = strtod(line, NULL);
+
+        if (line_len > 0 && !skip_header && count < max_iterations) {
+            line[line_len] = '\0';
+            voltage_measurement[count] = strtod(line, NULL);
+            printf("parsed[%d]=%.6f\n", count, voltage_measurement[count]);
+            count++;
+        }
+
+        if (count < max_iterations) {
+            max_iterations = count;
         }
         for (int k = 0; k < max_iterations && soc_estimate > 1.1; k++) {
             ukf_step(current, voltage_measurement[k], temperature, dt, &soc_estimate, &state_covariance);
-        #ifdef HOSTED
-            fprintf(csv, "%.1f,%.6f\n", (k+1)*dt, soc_estimate);
-        #else
-            len = snprintf(buffer, sizeof(buffer), "%.1f,%.6f\n", (k+1)*dt, soc_estimate);
-            lfs_file_write(&lfs,&csv,buffer,len);
-        #endif
+            // printf("%d\n", k+1);
+        // #ifdef HOSTED
+            printf("%d,%.6f\n",(k+1),soc_estimate);
+            fprintf(csv, "%d,%.6f\n", (k+1), soc_estimate);
+        // #else
+            // len = snprintf(buffer, sizeof(buffer), "%.1f,%.6f\n", (k+1)*dt, soc_estimate);
+            // lfs_file_write(&lfs,&csv,buffer,len);
+        // #endif
         }
-        }
+        
 
         printf("Results saved to UKF_PY_C_results.csv\n");
 
         #ifdef HOSTED
         fclose(py_csv);
-        // lfs_file_close(&lfs,&py_csv);
+        #else
+        lfs_file_close(&lfs,&py_csv);
+        // lfs_file_close(&lfs,&csv);
         #endif
         cleanup_ukf_system();
         

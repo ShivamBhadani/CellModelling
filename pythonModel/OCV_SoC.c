@@ -33,10 +33,7 @@ int load_ocv_data(const char* filename) {
         printf("Opened OCV file %s\n",filename);
 #endif
 
-    if (err) {
-        printf("Error: Cannot open file %s\n", filename);
-        return -1;
-    }
+   
 
     char line[256];
     int row = 0;
@@ -48,22 +45,55 @@ int load_ocv_data(const char* filename) {
         return -1;
     }
 #else
-    int n=0;
-    if(n = lfs_file_read(&lfs,&file,&line,sizeof(line)-1)){
-    	if(n<=0)
-    		lfs_file_close(&lfs,&file);
-    	char delim='\n';
-    	char *buf=strtok(line,&delim);
+    char rbuf[256];
+    char line_buf[2048];
+    int line_len = 0;
+    int header_skipped = 0;
+    int n = 0;
+    while ((n = lfs_file_read(&lfs, &file, rbuf, sizeof(rbuf))) > 0 && row < SOC_POINTS) {
+        for (int i = 0; i < n && row < SOC_POINTS; i++) {
+            if (rbuf[i] == '\n') {
+                line_buf[line_len] = '\0';
+
+                if (!header_skipped) {
+                    header_skipped = 1;
+                    line_len = 0;
+                    continue;
+                }
+
+                double values[TEMP_POINTS + 1];
+                int col = 0;
+                char *p = line_buf;
+                char *end = NULL;
+
+                while (*p && col < TEMP_POINTS + 1) {
+                    // printf("SoC Parsing: %s\n",p);
+                    values[col++] = strtod(p, &end);
+                    if (p == end) break;
+                    p = end;
+                    if (*p == ',') p++;
+                }
+
+                if (col >= TEMP_POINTS + 1) {
+                    for (int t = 0; t < TEMP_POINTS; t++) {
+                        ocv_table[100 - row][t] = values[t + 1];
+                    }
+                    row++;
+                }
+
+                line_len = 0;
+            } else if (line_len < (int)sizeof(line_buf) - 1) {
+                line_buf[line_len++] = rbuf[i];
+            }
+        }
+    }
+    if (n <= 0) {
+        lfs_file_close(&lfs, &file);
     }
 #endif
 #ifdef HOSTED
     // Read data lines
     while (fgets(line, sizeof(line), file) && row < SOC_POINTS) {
-#else
-    	while(n=lfs_file_read(&lfs,&file,&line,sizeof(line))){
-    		if(n<=0)
-    			lfs_file_close(&lfs,&file);
-#endif
         char *token = strtok(line, ",");
         int col = 0;
 
@@ -72,16 +102,18 @@ int load_ocv_data(const char* filename) {
 
         // Read OCV values for each temperature
         while (token && col < TEMP_POINTS) {
+            // printf("%s ",token);
             ocv_table[100-row][col] = atof(token);  // SoC decreases in CSV (100 to 0)
             token = strtok(NULL, ",");
             col++;
         }
         row++;
     }
+#endif
 #ifdef HOSTED
     fclose(file);
 #else
-    lfs_file_close(&lfs,&file);
+    // lfs_file_close(&lfs,&file);
 #endif
     table_initialized = 1;
     return 0;

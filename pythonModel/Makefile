@@ -16,7 +16,7 @@ DEFINES ?=
 all:
 	$(CC) $(CFLAGS) -o libcell.so $(SOURCES) $(CFLAGS) $(LDFLAGS) $(LIBS)
 test:
-	$(CC) $(CFLAGS) -o test_cellESR.out $(SOURCES) $(LIBS) -DUKFTEST
+	$(CC) $(CFLAGS) -o test_cellESR.out $(SOURCES) $(LIBS) -DUKFTEST $(DEFINES)
 	@echo "run ./test_cellESR.out to execute the test program"
 clean:
 	rm -f libcell.so test_cellESR.out
