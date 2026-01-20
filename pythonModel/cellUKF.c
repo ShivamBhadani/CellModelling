@@ -157,7 +157,7 @@ double ukf_step(double current, double voltage_measurement, double temperature,
                 double dt, double* soc_estimate, double* state_covariance) {
     
     if (!ocv_initialized || !esr_model) {
-        printf("Error: UKF system not initialized\n");
+        // printf("Error: UKF system not initialized\n");
         return *soc_estimate;
     }
     
@@ -333,7 +333,7 @@ static int bd_sync(const struct lfs_config *c) { return 0; }
 
 void mount_fs(void) {
 //    memset(&cfg, 0, sizeof(cfg));
-	printf("during mount lfs\n");
+	// printf("during mount lfs\n");
     cfg.read  = bd_read;
     cfg.prog  = bd_prog;
     cfg.erase = bd_erase;
@@ -348,11 +348,11 @@ void mount_fs(void) {
     cfg.lookahead_size = 16;
     cfg.compact_thresh = -1;
 
-    printf("just before lfs_mount()\n");
+    // printf("just before lfs_mount()\n");
     if (lfs_mount(&lfs, &cfg)) {
         printf("LittleFS mount failed!\n");
     } else {
-        printf("Mounted RAM-backed filesystem!\n");
+        // printf("Mounted RAM-backed filesystem!\n");
     }
 }
 
@@ -384,7 +384,7 @@ int main() {
     }
     #endif
 
-    printf("Python results file found. Running test.\n");
+    // printf("Python results file found. Running test.\n");
         double soc_estimate = 100.0;
         double state_covariance = 1.0;
         double current = 12.49;
@@ -456,7 +456,7 @@ int main() {
         if (line_len > 0 && !skip_header && count < max_iterations) {
             line[line_len] = '\0';
             voltage_measurement[count] = strtod(line, NULL);
-            printf("parsed[%d]=%.6f\n", count, voltage_measurement[count]);
+            // printf("parsed[%d]=%.6f\n", count, voltage_measurement[count]);
             count++;
         }
 
@@ -467,7 +467,7 @@ int main() {
             ukf_step(current, voltage_measurement[k], temperature, dt, &soc_estimate, &state_covariance);
             // printf("%d\n", k+1);
         // #ifdef HOSTED
-            printf("%d,%.6f\n",(k+1),soc_estimate);
+            // printf("%d,%.6f\n",(k+1),soc_estimate);
             fprintf(csv, "%d,%.6f\n", (k+1), soc_estimate);
         // #else
             // len = snprintf(buffer, sizeof(buffer), "%.1f,%.6f\n", (k+1)*dt, soc_estimate);
@@ -476,7 +476,7 @@ int main() {
         }
         
 
-        printf("Results saved to UKF_PY_C_results.csv\n");
+        // printf("Results saved to UKF_PY_C_results.csv\n");
 
         #ifdef HOSTED
         fclose(py_csv);
