@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -O2
 LIBS = -lm
 
 # Source files
-SOURCES = OCV_SoC.c cellESR.c cellUKF.c lfs.c lfs_util.c
+SOURCES = OCV_SoC.c cellESR.c cellUKF.c lfs.c lfs_util.c battukf.c
 HEADERS = OCV_SoC.h cellUKF.h cellESR.h
 LIBS = -lm
 CFLAGS += -Wall -Wextra -g
