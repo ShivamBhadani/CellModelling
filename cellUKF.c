@@ -4,6 +4,10 @@
 #include <stdlib.h>
 #include "cellESR.h"
 
+#ifdef DEBUGG
+#include <stdio.h>
+#endif
+
 // max number of RZ elements for embedded systems
 #define MAX_RZ_ELEMENTS 20
 
@@ -167,8 +171,8 @@ EXPORT void cellESR_get_ix_values(cellESR_t* cell, float* output) {
 
 
 typedef struct{
-	int soc;
-	int temp;
+	float soc;
+	float temp;
 	float val;
 }data;
 
@@ -184,7 +188,89 @@ static struct {
 static const float temperatures[TEMP_POINTS] = {
     -40.0f, -30.0f, -20.0f, -10.0f, 0.0f, 10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f, 70.0f, 80.0f, 90.0f
 };
+// float get_ocv_bilinear(float soc, float temp) {
+//     if (soc < 0.0f) soc = 0.0f;
+//     if (soc > 100.0f) soc = 100.0f;
+//     if (temp < -40.0f) temp = -40.0f;
+//     if (temp > 90.0f) temp = 90.0f;
+
+//     // Use int soc as index
+//     int soc_lower = (int)soc;
+//     int temp_index = (int)(temp*0.1f + 4.0f);
+//     float soc_weight = 0.0f;
+//     float temp_weight = 0.0f;
+//     printf("%.4f %.4f",soc,temp);
+//     if(soc>=last_ocv.luc.soc && soc<=last_ocv.ldc.soc && temp<=last_ocv.luc.temp && temp>=last_ocv.ruc.temp){
+//         soc_weight = soc - last_ocv.luc.soc;
+//         temp_weight = (temp - last_ocv.luc.temp)*0.1; // 1/(temp_at_upper - temp_at_lower)
+//         // return (last_ocv.luc.val*(1.0f-temp_weight)+last_ocv.ruc.val*temp_weight)*(1.0f-soc_weight)+\
+//         			(last_ocv.ldc.val*(1.0f-temp_weight)+last_ocv.rdc.val*temp_weight)*soc_weight;
+//         float q11 = last_ocv.luc.val;
+//         float q12 = last_ocv.ruc.val;
+//         float q21 = last_ocv.ldc.val;
+//         float q22 = last_ocv.rdc.val;
+//         float r1  = q11*(1.0f-temp_weight)+q12*temp_weight;
+//         float r2  = q21*(1.0f-temp_weight)+q22*temp_weight;
+//         printf("--hi--");
+//         return r1*(1.0f-soc_weight)+r2*soc_weight; 
+
+//     }
+
+//     int soc_upper = soc_lower;
+
+//     // Handle SoC corner cases
+//     if (soc_lower < 100) {
+//         soc_upper = soc_lower + 1;
+//         soc_weight = soc - (float)soc_lower;
+//     }
+//     int temp_lower = temp_index;
+//     int temp_upper = temp_index;
+
+//     // Handle temperature corner cases
+//     if (temp_index < 0) {
+//         // temp < -40, already clamped above
+//         temp_lower = temp_upper = 0;
+//     } else if (temp_index >= TEMP_POINTS) {
+//         // temp > 90, already clamped above
+//         temp_lower = temp_upper = TEMP_POINTS - 1;
+//     } else if (temp_index < TEMP_POINTS - 1) {
+//         // Normal case: interpolate between two temperature points
+//         temp_upper = temp_index + 1;
+//         float temp_at_lower = temperatures[temp_lower];
+//         float temp_at_upper = temperatures[temp_upper];
+//         temp_weight = (temp - temp_at_lower) *0.1f; // 1/(temp_at_upper - temp_at_lower)
+//     }
+//     float q11 = ocv_table[soc_lower][temp_lower];
+//     float q12 = ocv_table[soc_lower][temp_upper];
+//     float q21 = ocv_table[soc_upper][temp_lower];
+//     float q22 = ocv_table[soc_upper][temp_upper];
+//     last_ocv.luc.soc=soc_lower;
+//     last_ocv.luc.val=q11;
+//     last_ocv.ldc.soc=soc_upper;
+//     last_ocv.ldc.val=q12;
+//     last_ocv.luc.temp=temperatures[temp_lower];
+//     last_ocv.ruc.val=q21;
+//     last_ocv.ruc.temp=temperatures[temp_upper];
+//     last_ocv.rdc.val=q22;
+
+//     // Perform bilinear interpolation
+//     float temp_weight_inv = 1.0f - temp_weight;
+//     float soc_weight_inv = 1.0f - soc_weight;
+
+//     float r1 = q11 * temp_weight_inv + q12 * temp_weight;
+//     float r2 = q21 * temp_weight_inv + q22 * temp_weight;
+
+//     return r1 * soc_weight_inv + r2 * soc_weight;
+// }
+
 float get_ocv_bilinear(float soc, float temp) {
+	// int x=get_cycle_count();
+    // if (!table_initialized) {
+    	// bilinearCounts+=0;
+        // return -1.0f;
+    // }
+
+    // Clamp inputs for corner cases
     if (soc < 0.0f) soc = 0.0f;
     if (soc > 100.0f) soc = 100.0f;
     if (temp < -40.0f) temp = -40.0f;
@@ -192,26 +278,21 @@ float get_ocv_bilinear(float soc, float temp) {
 
     // Use int soc as index
     int soc_lower = (int)soc;
-    int temp_index = (int)(temp*0.1f + 4.0f);
-    float soc_weight = 0.0f;
-    float temp_weight = 0.0f;
-
-    if(soc>=last_ocv.luc.soc && soc<=last_ocv.ldc.soc && temp<=last_ocv.luc.temp && temp>=last_ocv.ruc.temp){
-        soc_weight = soc - last_ocv.luc.soc;
-        temp_weight = (temp - last_ocv.luc.temp)*0.1; // 1/(temp_at_upper - temp_at_lower)
-        return (last_ocv.luc.val*(1.0f-temp_weight)+last_ocv.ruc.val*temp_weight)*(1.0f-soc_weight)+\
-        			(last_ocv.ldc.val*(1.0f-temp_weight)+last_ocv.rdc.val*temp_weight)*soc_weight;
-    }
-
     int soc_upper = soc_lower;
+    float soc_weight = 0.0f;
 
     // Handle SoC corner cases
     if (soc_lower < 100) {
         soc_upper = soc_lower + 1;
         soc_weight = soc - (float)soc_lower;
     }
+    // If soc_lower == 100, soc_upper stays 100 and soc_weight stays 0
+
+    // Use int (temp+40)/10 as temp index
+    int temp_index = (int)(temp + 40.0f) / 10;
     int temp_lower = temp_index;
     int temp_upper = temp_index;
+    float temp_weight = 0.0f;
 
     // Handle temperature corner cases
     if (temp_index < 0) {
@@ -227,18 +308,15 @@ float get_ocv_bilinear(float soc, float temp) {
         float temp_at_upper = temperatures[temp_upper];
         temp_weight = (temp - temp_at_lower) *0.1f; // 1/(temp_at_upper - temp_at_lower)
     }
-    float q11 = ocv_table[soc_lower][temp_lower];
-    float q12 = ocv_table[soc_lower][temp_upper];
-    float q21 = ocv_table[soc_upper][temp_lower];
-    float q22 = ocv_table[soc_upper][temp_upper];
-    last_ocv.luc.soc=soc_lower;
-    last_ocv.luc.val=q11;
-    last_ocv.ldc.soc=soc_upper;
-    last_ocv.ldc.val=q12;
-    last_ocv.luc.temp=temperatures[temp_lower];
-    last_ocv.ruc.val=q21;
-    last_ocv.ruc.temp=temperatures[temp_upper];
-    last_ocv.rdc.val=q22;
+    // If temp_index == TEMP_POINTS-1, temp_upper stays same as temp_lower
+
+    // Get the four corner points for bilinear interpolation
+    float q11 = ocv_table[100-soc_lower][temp_lower];
+    float q12 = ocv_table[100-soc_lower][temp_upper];
+    float q21 = ocv_table[100-soc_upper][temp_lower];
+    float q22 = ocv_table[100-soc_upper][temp_upper];
+    // printf("socl--%d socu--%d templ--%d tempu--%d\n",soc_lower,soc_upper,temp_lower,temp_upper);
+    // printf("q11-%.4f q12-%.4f q21-%.4f q22-%.4f ",q11,q12,q21,q22);
 
     // Perform bilinear interpolation
     float temp_weight_inv = 1.0f - temp_weight;
@@ -246,7 +324,8 @@ float get_ocv_bilinear(float soc, float temp) {
 
     float r1 = q11 * temp_weight_inv + q12 * temp_weight;
     float r2 = q21 * temp_weight_inv + q22 * temp_weight;
-
+    // int y=get_cycle_count();
+    // bilinearCounts+=y-x;
     return r1 * soc_weight_inv + r2 * soc_weight;
 }
 
@@ -416,6 +495,7 @@ float ukf_step(float current, float voltage_measurement, float temperature,
         if (soc_bounded > 100.0f) soc_bounded = 100.0f;
 
         float ocv = get_ocv_bilinear(soc_bounded, temperature);
+        // printf("soc-%.4f temp-%.4f\n",soc_bounded,temperature);
 
         Y[i] = ocv * ocvSoH_gain_factor + deltaV + X[i][2];
     }
@@ -425,6 +505,7 @@ float ukf_step(float current, float voltage_measurement, float temperature,
     for (int i = 0; i < NUM_SIGMA_POINTS; i++) {
         yhat += Wmx[i] * Y[i];
     }
+    // printf("--yhat--%.4f-- ",yhat);
 
     // Innovation covariance
     float SigmaY = 0.0f;
@@ -469,6 +550,7 @@ float ukf_step(float current, float voltage_measurement, float temperature,
     // UKFcounts+=y-x;
     return xhat_plus;
 }
+// #if 0
 __attribute__((noreturn)) int main(void) {
         init_ukf_system();
         float soc_estimate = 100.0f;
@@ -479,10 +561,21 @@ __attribute__((noreturn)) int main(void) {
         int max_iterations = 1000;
         for (int k = 0; k < max_iterations && soc_estimate > 1.1f; k++) {
             ukf_step(current, voltage_measurement[k], temperature, dt, &soc_estimate, &state_covariance);
+            #ifdef DEBUGG
+            printf("%.4f %.4f %.4f\n",voltage_measurement[k],soc_estimate,current);
+            #endif
         }
+        #ifdef ARMCM55
         while( 1 )
            {
            	__asm volatile("nop");
            }
+        #endif
 
 }
+
+// #endif
+
+// int main(void){
+//     printf("%.4f %.4f %.4f %.4f\n",ocv_table[1][6],ocv_table[1][7],ocv_table[0][6],ocv_table[0][7]);
+// }
