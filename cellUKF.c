@@ -1,4 +1,4 @@
-#include <math.h>
+// #include <math.h>
 #include "y_true.h"
 #include "ocv_table.h"
 #include <stdlib.h>
@@ -7,6 +7,17 @@
 #ifdef DEBUGG
 #include <stdio.h>
 #endif
+
+static inline float sqrtf_hw(float x)
+{
+    return __builtin_sqrtf(x);
+}
+
+static inline float fabs_hw(float x)
+{
+    return __builtin_fabsf(x);
+}
+
 
 // max number of RZ elements for embedded systems
 #define MAX_RZ_ELEMENTS 20
@@ -96,7 +107,7 @@ EXPORT float cellESR_calculateDeltaV(cellESR_t* cell, float i_new, float dt) {
                              (1.0f + dt / cell->tau_values[i]);
         
         // Clamp values to prevent overshoot
-        if (fabs(cell->ix_values[i]) > fabs(i_new)) {
+        if (fabs_hw(cell->ix_values[i]) > fabs_hw(i_new)) {
             cell->ix_values[i] = i_new;
         }
         
@@ -374,14 +385,14 @@ void init_ukf_weights(void) {
 void cholesky_3x3(float A[3][3], float L[3][3]) {
     // memset(L, 0, sizeof(float) * 9);
 
-    L[0][0] = sqrtf(A[0][0]);
+    L[0][0] = sqrtf_hw(A[0][0]);
     L[1][0] = A[1][0] / L[0][0];
     L[2][0] = A[2][0] / L[0][0];
 
-    L[1][1] = sqrtf(A[1][1] - L[1][0] * L[1][0]);
+    L[1][1] = sqrtf_hw(A[1][1] - L[1][0] * L[1][0]);
     L[2][1] = (A[2][1] - L[2][0] * L[1][0]) / L[1][1];
 
-    L[2][2] = sqrtf(A[2][2] - L[2][0] * L[2][0] - L[2][1] * L[2][1]);
+    L[2][2] = sqrtf_hw(A[2][2] - L[2][0] * L[2][0] - L[2][1] * L[2][1]);
 }
 
 int init_ukf_system(void) {

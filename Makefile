@@ -1,6 +1,6 @@
 .RECIPEPREFIX:=>
 all:
->gcc cellUKF.c -lm -g -o a.out -DDEBUGG
+>gcc cellUKF.c -g -o a.out -DDEBUGG
 
 run:
 >cgdb ./a.out
