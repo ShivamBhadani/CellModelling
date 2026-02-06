@@ -1,6 +1,4 @@
-#ifdef HOSTED
 #include <stdio.h>
-#endif
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -13,27 +11,30 @@ extern struct lfs_config cfg;
 #define SOC_POINTS 101  // SoC from 0 to 100 in 1% increments
 #define TEMP_POINTS 14  // Temperature from -40 to 90 in 10°C steps
 
+static int last_temp_low_idx = 0;
+static int last_temp_high_idx = 0;
+
+static int last_soc_low_idx = 0;
+static int last_soc_high_idx = 0;
 
 // Temperature array: -40, -30, -20, -10, 0, 10, 20, 30, 40, 50, 60, 70, 80, 90
-static const float temperatures[TEMP_POINTS] = {
-    -40.0f, -30.0f, -20.0f, -10.0f, 0.0f, 10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f, 70.0f, 80.0f, 90.0f
+static const double temperatures[TEMP_POINTS] = {
+    -40.0, -30.0, -20.0, -10.0, 0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0
 };
 
 // OCV lookup table [SoC][Temperature]
-static float ocv_table[SOC_POINTS][TEMP_POINTS];
+static double ocv_table[SOC_POINTS][TEMP_POINTS];
 static int table_initialized = 0;
 
 int load_ocv_data(const char* filename) {
 #ifdef HOSTED
     FILE *file = fopen(filename, "r");
-    if(file==NULL)printf("file not found\n");
-    return -1;
 #else
 	lfs_file_t file;
 	static struct lfs_file_config file_cfg={0};
     int err=lfs_file_opencfg(&lfs,&file,filename,LFS_O_RDONLY,&file_cfg);
-//    if(!err)
-//        printf("Opened OCV file %s\n",filename);
+    if(!err)
+        printf("Opened OCV file %s\n",filename);
 #endif
 
    
@@ -64,14 +65,14 @@ int load_ocv_data(const char* filename) {
                     continue;
                 }
 
-                float values[TEMP_POINTS + 1];
+                double values[TEMP_POINTS + 1];
                 int col = 0;
                 char *p = line_buf;
                 char *end = NULL;
 
                 while (*p && col < TEMP_POINTS + 1) {
                     // printf("SoC Parsing: %s\n",p);
-                    values[col++] = strtof(p, &end);
+                    values[col++] = strtod(p, &end);
                     if (p == end) break;
                     p = end;
                     if (*p == ',') p++;
@@ -122,8 +123,8 @@ int load_ocv_data(const char* filename) {
     return 0;
 }
 
-void find_interpolation_params(float value, const float* array, int size,
-                              int* lower_idx, int* upper_idx, float* weight) {
+void find_interpolation_params(double value, const double* array, int size,
+                              int* lower_idx, int* upper_idx, double* weight) {
     // Handle boundary cases
     if (value <= array[0]) {
         *lower_idx = 0;
@@ -150,50 +151,67 @@ void find_interpolation_params(float value, const float* array, int size,
     }
 }
 
-
-
-float get_ocv_bilinear(float soc, float temp) {
+double get_ocv_bilinear(double soc, double temp) {
     if (!table_initialized) {
-//        printf("Error: OCV table not initialized. Call load_ocv_data() first.\n");
+        printf("Error: OCV table not initialized. Call load_ocv_data() first.\n");
         return -1.0;
     }
 
     // Bound checking
-    if (soc < 0.0) soc = 0.0f;
-    if (soc > 100.0) soc = 100.0f;
-    if (temp < -40.0) temp = -40.0f;
-    if (temp > 90.0) temp = 90.0f;
+    if (soc < 0.0) soc = 0.0;
+    if (soc > 100.0) soc = 100.0;
+    if (temp < -40.0) temp = -40.0;
+    if (temp > 90.0) temp = 90.0;
 
     // Create SoC array for interpolation (0 to 100 in 1% steps)
-    float soc_array[SOC_POINTS];
+    double soc_array[SOC_POINTS];
     for (int i = 0; i < SOC_POINTS; i++) {
-        soc_array[i] = (float)i;
+        soc_array[i] = (double)i;
     }
 
     // Find interpolation parameters for SoC
     int soc_lower, soc_upper;
-    float soc_weight;
-    find_interpolation_params(soc, soc_array, SOC_POINTS, &soc_lower, &soc_upper, &soc_weight);
+    double soc_weight;
+    if(soc>=soc_array[last_soc_low_idx] && soc<=soc_array[last_soc_high_idx]){
+        soc_lower=last_soc_low_idx;
+        soc_upper=last_soc_high_idx;
+        soc_weight=(soc - soc_array[soc_lower]) / (soc_array[soc_upper] - soc_array[soc_lower]);
+    }else{
+        find_interpolation_params(soc, soc_array, SOC_POINTS, &soc_lower, &soc_upper, &soc_weight);
+        last_soc_low_idx=soc_lower;
+        last_soc_high_idx=soc_upper;
+    }
+    // find_interpolation_params(soc, soc_array, SOC_POINTS, &soc_lower, &soc_upper, &soc_weight);
 
     // Find interpolation parameters for Temperature
     int temp_lower, temp_upper;
-    float temp_weight;
-    find_interpolation_params(temp, temperatures, TEMP_POINTS, &temp_lower, &temp_upper, &temp_weight);
+    double temp_weight;
+    if(temp>=temperatures[last_temp_low_idx] && temp<=temperatures[last_temp_high_idx]){
+        temp_lower=last_temp_low_idx;
+        temp_upper=last_temp_high_idx;
+        temp_weight=(temp - temperatures[temp_lower]) / (temperatures[temp_upper] - temperatures[temp_lower]);
+    }else{
+        find_interpolation_params(temp, temperatures, TEMP_POINTS, &temp_lower, &temp_upper, &temp_weight);
+        last_temp_low_idx=temp_lower;
+        last_temp_high_idx=temp_upper;
+    }
+    // find_interpolation_params(temp, temperatures, TEMP_POINTS, &temp_lower, &temp_upper, &temp_weight);
 
     // Get the four corner points for bilinear interpolation
-    float q11 = ocv_table[soc_lower][temp_lower];   // (soc_lower, temp_lower)
-    float q12 = ocv_table[soc_lower][temp_upper];   // (soc_lower, temp_upper)
-    float q21 = ocv_table[soc_upper][temp_lower];   // (soc_upper, temp_lower)
-    float q22 = ocv_table[soc_upper][temp_upper];   // (soc_upper, temp_upper)
+    double q11 = ocv_table[soc_lower][temp_lower];   // (soc_lower, temp_lower)
+    double q12 = ocv_table[soc_lower][temp_upper];   // (soc_lower, temp_upper)
+    double q21 = ocv_table[soc_upper][temp_lower];   // (soc_upper, temp_lower)
+    double q22 = ocv_table[soc_upper][temp_upper];   // (soc_upper, temp_upper)
+    printf("q11-%.4f q12-%.4f q21-%.4f q22-%.4f ",q11,q12,q21,q22);
 
     // Perform bilinear interpolation
-    float r1 = q11 * (1.0 - temp_weight) + q12 * temp_weight;  // Interpolate along temperature for soc_lower
-    float r2 = q21 * (1.0 - temp_weight) + q22 * temp_weight;  // Interpolate along temperature for soc_upper
-    float result = r1 * (1.0 - soc_weight) + r2 * soc_weight;  // Interpolate along SoC
+    double r1 = q11 * (1.0 - temp_weight) + q12 * temp_weight;  // Interpolate along temperature for soc_lower
+    double r2 = q21 * (1.0 - temp_weight) + q22 * temp_weight;  // Interpolate along temperature for soc_upper
+    double result = r1 * (1.0 - soc_weight) + r2 * soc_weight;  // Interpolate along SoC
 
     return result;
 }
-#ifdef HOSTED
+
 void print_ocv_table() {
     if (!table_initialized) {
         printf("Table not initialized\n");
@@ -214,7 +232,6 @@ void print_ocv_table() {
         printf("\n");
     }
 }
-#endif
 
 #ifdef TEST
 int main() {
@@ -225,13 +242,13 @@ int main() {
     }
 
     // Test cases
-    float test_socs[] = {0.0, 25.5, 50.0, 75.3, 100.0};
-    float test_temps[] = {-40.0, -15.0, 0.0, 25.0, 60.0, 90.0};
+    double test_socs[] = {0.0, 25.5, 50.0, 75.3, 100.0};
+    double test_temps[] = {-40.0, -15.0, 0.0, 25.0, 60.0, 90.0};
 
     printf("Test Results:\n");
     for (int i = 0; i < 5; i++) {
         for (int j = 0; j < 6; j++) {
-            float ocv = get_ocv_bilinear(test_socs[i], test_temps[j]);
+            double ocv = get_ocv_bilinear(test_socs[i], test_temps[j]);
             printf("SoC: %6.1f%%, Temp: %6.1f°C -> OCV: %7.4f V\n",
                    test_socs[i], test_temps[j], ocv);
         }
