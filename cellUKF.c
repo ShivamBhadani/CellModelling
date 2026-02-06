@@ -1,23 +1,25 @@
-// #include <math.h>
 #include "y_true.h"
 #include "ocv_table.h"
-#include <stdlib.h>
 #include "cellESR.h"
 
 #ifdef DEBUGG
 #include <stdio.h>
 #endif
 
-static inline float sqrtf_hw(float x)
-{
-    return __builtin_sqrtf(x);
+float sqrtf(float x) {
+    if (x < 0.0f) return 0.0f / 0.0f; // NaN
+    if (x == 0.0f) return 0.0f;
+
+    float guess = x;
+    for (int i = 0; i < 10; i++) {
+        guess = 0.5f * (guess + x / guess);
+    }
+    return guess;
 }
 
-static inline float fabs_hw(float x)
-{
-    return __builtin_fabsf(x);
+float fabs_f(float x) {
+    return x < 0.0f ? -x : x;
 }
-
 
 // max number of RZ elements for embedded systems
 #define MAX_RZ_ELEMENTS 20
@@ -48,9 +50,10 @@ struct cellESR {
 #endif
 
 // Create and initialize cellESR structure
+cellESR_t cell[sizeof(cellESR_t)] = {0};
 EXPORT cellESR_t* cellESR_create(float R0, float* RZlist_flat, int num_RZ) {
-    cellESR_t* cell = (cellESR_t*)malloc(sizeof(cellESR_t));
-    if (!cell) return NULL;
+    // cellESR_t* cell= (cellESR_t*)(malloc ? malloc(sizeof(cellESR_t)) : cell);
+    // if (!cell) return NULL;
     
     cell->R0 = R0;
     cell->R0multiplier = 1.0f;
@@ -85,7 +88,7 @@ EXPORT cellESR_t* cellESR_create(float R0, float* RZlist_flat, int num_RZ) {
 // Destroy cellESR structure
 EXPORT void cellESR_destroy(cellESR_t* cell) {
     if (cell) {
-        free(cell);
+        // free(cell);
     }
 }
 
@@ -107,7 +110,7 @@ EXPORT float cellESR_calculateDeltaV(cellESR_t* cell, float i_new, float dt) {
                              (1.0f + dt / cell->tau_values[i]);
         
         // Clamp values to prevent overshoot
-        if (fabs_hw(cell->ix_values[i]) > fabs_hw(i_new)) {
+        if (fabs_f(cell->ix_values[i]) > fabs_f(i_new)) {
             cell->ix_values[i] = i_new;
         }
         
@@ -384,15 +387,26 @@ void init_ukf_weights(void) {
 
 void cholesky_3x3(float A[3][3], float L[3][3]) {
     // memset(L, 0, sizeof(float) * 9);
-
+    #ifndef __linux__
     L[0][0] = sqrtf_hw(A[0][0]);
+    #else
+    L[0][0] = sqrtf(A[0][0]);
+    #endif
     L[1][0] = A[1][0] / L[0][0];
     L[2][0] = A[2][0] / L[0][0];
 
+    #ifndef __linux__
     L[1][1] = sqrtf_hw(A[1][1] - L[1][0] * L[1][0]);
+    #else
+    L[1][1] = sqrtf(A[1][1] - L[1][0] * L[1][0]);
+    #endif
     L[2][1] = (A[2][1] - L[2][0] * L[1][0]) / L[1][1];
 
+    #ifndef __linux__
     L[2][2] = sqrtf_hw(A[2][2] - L[2][0] * L[2][0] - L[2][1] * L[2][1]);
+    #else
+    L[2][2] = sqrtf(A[2][2] - L[2][0] * L[2][0] - L[2][1] * L[2][1]);
+    #endif
 }
 
 int init_ukf_system(void) {
