@@ -387,26 +387,14 @@ void init_ukf_weights(void) {
 
 void cholesky_3x3(float A[3][3], float L[3][3]) {
     // memset(L, 0, sizeof(float) * 9);
-    #ifndef __linux__
-    L[0][0] = sqrtf_hw(A[0][0]);
-    #else
     L[0][0] = sqrtf(A[0][0]);
-    #endif
     L[1][0] = A[1][0] / L[0][0];
     L[2][0] = A[2][0] / L[0][0];
 
-    #ifndef __linux__
-    L[1][1] = sqrtf_hw(A[1][1] - L[1][0] * L[1][0]);
-    #else
     L[1][1] = sqrtf(A[1][1] - L[1][0] * L[1][0]);
-    #endif
     L[2][1] = (A[2][1] - L[2][0] * L[1][0]) / L[1][1];
 
-    #ifndef __linux__
-    L[2][2] = sqrtf_hw(A[2][2] - L[2][0] * L[2][0] - L[2][1] * L[2][1]);
-    #else
     L[2][2] = sqrtf(A[2][2] - L[2][0] * L[2][0] - L[2][1] * L[2][1]);
-    #endif
 }
 
 int init_ukf_system(void) {
