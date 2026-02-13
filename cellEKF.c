@@ -1,25 +1,26 @@
+/*
+ * cellEKF.c
+ *
+ *  Created on: 13-Feb-2026
+ *      Author: shivam
+ */
+
+
+#include <math.h>
 #include "y_true.h"
 #include "ocv_table.h"
+#include <stdlib.h>
 #include "cellESR.h"
 
 #ifdef DEBUGG
 #include <stdio.h>
 #endif
 
-float sqrtf(float x) {
-    if (x < 0.0f) return 0.0f / 0.0f; // NaN
-    if (x == 0.0f) return 0.0f;
-
-    float guess = x;
-    for (int i = 0; i < 10; i++) {
-        guess = 0.5f * (guess + x / guess);
-    }
-    return guess;
-}
-
-float fabs_f(float x) {
-    return x < 0.0f ? -x : x;
-}
+// ===== Filter selection (manual switch) =====
+// 0 = UKF, 1 = EKF
+#ifndef USE_EKF
+#define USE_EKF 1
+#endif
 
 // max number of RZ elements for embedded systems
 #define MAX_RZ_ELEMENTS 20
@@ -32,14 +33,14 @@ struct cellESR {
     float esrDC;
     float deltaV;
     int time;
-    
+
     // arrays for RZ elements
     float R_values[MAX_RZ_ELEMENTS];
     float tau_values[MAX_RZ_ELEMENTS];
     int indices[MAX_RZ_ELEMENTS];
     float ix_values[MAX_RZ_ELEMENTS];
     int num_elements;
-    
+
 };
 
 // for shared library
@@ -50,29 +51,27 @@ struct cellESR {
 #endif
 
 // Create and initialize cellESR structure
-cellESR_t cell_t = {0};
-cellESR_t* cell=&cell_t;
 EXPORT cellESR_t* cellESR_create(float R0, float* RZlist_flat, int num_RZ) {
-    // cellESR_t* cell= (cellESR_t*)(malloc ? malloc(sizeof(cellESR_t)) : cell);
-    // if (!cell) return NULL;
-    
+    cellESR_t* cell = (cellESR_t*)malloc(sizeof(cellESR_t));
+    if (!cell) return NULL;
+
     cell->R0 = R0;
     cell->R0multiplier = 1.0f;
     cell->esrDC = R0;
     cell->deltaV = 0.0f;
     cell->time = 0;
     cell->num_elements = (num_RZ < MAX_RZ_ELEMENTS) ? num_RZ : MAX_RZ_ELEMENTS;
-    
+
     // Process RZlist (flattened array: [R0, Z0, type0, R1, Z1, type1, ...])
     for (int i = 0; i < cell->num_elements; i++) {
         float R = RZlist_flat[i * 3];
         float Z = RZlist_flat[i * 3 + 1];
         int type = (int)RZlist_flat[i * 3 + 2];  // 0 or 1
-        
+
         cell->R_values[i] = R;
         cell->ix_values[i] = 0.0f;
         cell->indices[i] = type;
-        
+
         if (type == 0) {
             // tau = R * Z, and add R to esrDC
             cell->tau_values[i] = R * Z;
@@ -82,49 +81,49 @@ EXPORT cellESR_t* cellESR_create(float R0, float* RZlist_flat, int num_RZ) {
             cell->tau_values[i] = Z / R;
         }
     }
-    
+
     return cell;
 }
 
 // Destroy cellESR structure
 EXPORT void cellESR_destroy(cellESR_t* cell) {
     if (cell) {
-        // free(cell);
+        free(cell);
     }
 }
 
 // Calculate delta V using ESR model
 EXPORT float cellESR_calculateDeltaV(cellESR_t* cell, float i_new, float dt) {
     if (!cell) return 0.0f;
-    
+
     // Update time
     cell->time += dt;
-    
+
     // Calculate ESR contribution
     float ESRout = cell->R0 * cell->R0multiplier;
     float dV = i_new * ESRout;
-    
+
     // Process each RZ element
     for (int i = 0; i < cell->num_elements; i++) {
         // Update ix_values using: ix_next = (ix_previous + i_new * dt / tau) / (1 + dt / tau)
-        cell->ix_values[i] = (cell->ix_values[i] + i_new * dt / cell->tau_values[i]) / 
+        cell->ix_values[i] = (cell->ix_values[i] + i_new * dt / cell->tau_values[i]) /
                              (1.0f + dt / cell->tau_values[i]);
-        
+
         // Clamp values to prevent overshoot
-        if (fabs_f(cell->ix_values[i]) > fabs_f(i_new)) {
+        if (fabs(cell->ix_values[i]) > fabs(i_new)) {
             cell->ix_values[i] = i_new;
         }
-        
+
         // Calculate deltaV contribution based on type
         if (cell->indices[i] == 1) {
             // For indices == 1: dV += R * (i_new - ix_values)
             dV += cell->R_values[i] * (i_new - cell->ix_values[i]);
         } else {
-            // For indices == 0: dV += R * ix_values  
+            // For indices == 0: dV += R * ix_values
             dV += cell->R_values[i] * cell->ix_values[i];
         }
     }
-    
+
     cell->deltaV = dV;
     return dV;
 }
@@ -203,6 +202,10 @@ static struct {
 static const float temperatures[TEMP_POINTS] = {
     -40.0f, -30.0f, -20.0f, -10.0f, 0.0f, 10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f, 70.0f, 80.0f, 90.0f
 };
+
+// Global variable to store the last computed OCV derivative
+static float last_ocv_derivative = 0.0f;
+
 // float get_ocv_bilinear(float soc, float temp) {
 //     if (soc < 0.0f) soc = 0.0f;
 //     if (soc > 100.0f) soc = 100.0f;
@@ -227,7 +230,7 @@ static const float temperatures[TEMP_POINTS] = {
 //         float r1  = q11*(1.0f-temp_weight)+q12*temp_weight;
 //         float r2  = q21*(1.0f-temp_weight)+q22*temp_weight;
 //         printf("--hi--");
-//         return r1*(1.0f-soc_weight)+r2*soc_weight; 
+//         return r1*(1.0f-soc_weight)+r2*soc_weight;
 
 //     }
 
@@ -293,7 +296,6 @@ float get_ocv_bilinear(float soc, float temp) {
 
     // Use int soc as index
     int soc_lower = (int)soc;
-    // printf("%f- %d-",soc,soc_lower);
     int soc_upper = soc_lower;
     float soc_weight = 0.0f;
 
@@ -340,18 +342,30 @@ float get_ocv_bilinear(float soc, float temp) {
 
     float r1 = q11 * temp_weight_inv + q12 * temp_weight;
     float r2 = q21 * temp_weight_inv + q22 * temp_weight;
+
+    // Compute derivative analytically: d(OCV)/d(soc) = r2 - r1
+    // This is the derivative per 1% SOC change
+    last_ocv_derivative = r2 - r1;
+
     // int y=get_cycle_count();
     // bilinearCounts+=y-x;
     return r1 * soc_weight_inv + r2 * soc_weight;
 }
 
-#define Nx 1       
-#define Nxa 3      
-#define Ny 1
-#define NUM_SIGMA_POINTS (2*Nxa+1) 
+// Returns the OCV derivative computed during the last call to get_ocv_bilinear
+static float ocv_derivative_soc(float soc, float temp) {
+    // Simply return the derivative that was computed in get_ocv_bilinear
+    // Note: get_ocv_bilinear must be called first with the same soc and temp
+    return last_ocv_derivative;
+}
 
-static const float inv_2h2 = (float)(1.0f / (2.0f * 3.0f));  
-static const float h = 1.732050808f; 
+#define Nx 1
+#define Nxa 3
+#define Ny 1
+#define NUM_SIGMA_POINTS (2*Nxa+1)
+
+static const float inv_2h2 = (float)(1.0f / (2.0f * 3.0f));
+static const float h = 1.732050808f;
 static const float ocvSoH_gain_factor = 1.0f;
 
 // UKF weights
@@ -389,6 +403,7 @@ void init_ukf_weights(void) {
 
 void cholesky_3x3(float A[3][3], float L[3][3]) {
     // memset(L, 0, sizeof(float) * 9);
+
     L[0][0] = sqrtf(A[0][0]);
     L[1][0] = A[1][0] / L[0][0];
     L[2][0] = A[2][0] / L[0][0];
@@ -414,6 +429,10 @@ int init_ukf_system(void) {
 
     return 0;
 }
+
+int init_filter_system(void) {
+    return init_ukf_system();
+}
 void cleanup_ukf_system(void) {
     if (esr_model) {
         cellESR_destroy(esr_model);
@@ -432,6 +451,12 @@ float ukf_step(float current, float voltage_measurement, float temperature,
     // Current estimates
     float xhat = *soc_estimate;
     float SigmaX = *state_covariance;
+    if (!isfinite(xhat)) {
+        xhat = 0.0f;
+    }
+    if (!isfinite(SigmaX) || SigmaX < 1e-6f) {
+        SigmaX = 1e-6f;
+    }
 
     // === STEP 1: GENERATE SIGMA POINTS ===
 
@@ -479,6 +504,9 @@ float ukf_step(float current, float voltage_measurement, float temperature,
     float Xx[NUM_SIGMA_POINTS];  // Predicted state sigma points
     for (int i = 0; i < NUM_SIGMA_POINTS; i++) {
         Xx[i] = X[i][0] - dSoC[i] ;  // state - discharge + process_noise
+        if (!isfinite(Xx[i])) {
+            Xx[i] = xhat;
+        }
         // printf("Xx[%d]=%.6f ",i,Xx[i]);
     }
     // printf("\n");
@@ -488,6 +516,9 @@ float ukf_step(float current, float voltage_measurement, float temperature,
     float xhat_minus = 0.0f;
     for (int i = 0; i < NUM_SIGMA_POINTS; i++) {
         xhat_minus += Wmx[i] * Xx[i];
+    }
+    if (!isfinite(xhat_minus)) {
+        xhat_minus = xhat;
     }
 
     // Predicted state covariance
@@ -506,6 +537,7 @@ float ukf_step(float current, float voltage_measurement, float temperature,
     for (int i = 0; i < NUM_SIGMA_POINTS; i++) {
         // Ensure SoC is within bounds for OCV lookup
         float soc_bounded = Xx[i];
+        if (!isfinite(soc_bounded)) soc_bounded = xhat_minus;
         if (soc_bounded < 0.0f) soc_bounded = 0.0f;
         if (soc_bounded > 100.0f) soc_bounded = 100.0f;
 
@@ -565,28 +597,90 @@ float ukf_step(float current, float voltage_measurement, float temperature,
     // UKFcounts+=y-x;
     return xhat_plus;
 }
-// #if 0
-__attribute__((noreturn)) int main(void) {
-        init_ukf_system();
-        float soc_estimate = 100.0f;
-        float state_covariance = 1.0f;
-        float current = 12.49f;
-        float temperature = 25.0f;
-        float dt = 1.0f;
-        int max_iterations = 1000;
-        for (int k = 0; k < max_iterations && soc_estimate > 1.1f; k++) {
-            ukf_step(current, voltage_measurement[k], temperature, dt, &soc_estimate, &state_covariance);
-            #ifdef DEBUGG
-            printf("%.4f %.4f %.4f\n",voltage_measurement[k],soc_estimate,current);
-            #endif
-        }
-        #ifdef ARMCM55
-        while( 1 )
-           {
-           	__asm volatile("nop");
-           }
-        #endif
 
+float ekf_step(float current, float voltage_measurement, float temperature,
+               float dt, float* soc_estimate, float* state_covariance) {
+    if (!ocv_initialized || !esr_model) {
+        return *soc_estimate;
+    }
+
+    // Current estimates
+    float xhat = *soc_estimate;
+    float SigmaX = *state_covariance;
+    if (!isfinite(xhat)) {
+        xhat = 0.0f;
+    }
+    if (!isfinite(SigmaX) || SigmaX < 1e-6f) {
+        SigmaX = 1e-6f;
+    }
+
+    // === TIME UPDATE ===
+    float discharge = current * dt; // As
+    float dSoC = 100.0f * discharge / (3.6f * coulombEfficiency * MaxCapacity * SoH / 100.0f);
+
+    float xhat_minus = xhat - dSoC;
+    float SigmaX_minus = SigmaX + SigmaW;
+
+    // === MEASUREMENT UPDATE ===
+    float soc_bounded = xhat_minus;
+    if (soc_bounded < 0.0f) soc_bounded = 0.0f;
+    if (soc_bounded > 100.0f) soc_bounded = 100.0f;
+
+    float deltaV = cellESR_calculateDeltaV(esr_model, current, dt);
+    float ocv = get_ocv_bilinear(soc_bounded, temperature);
+    float yhat = ocv * ocvSoH_gain_factor + deltaV;
+
+    float H = ocv_derivative_soc(soc_bounded, temperature) * ocvSoH_gain_factor;
+    float S = H * SigmaX_minus * H + SigmaV;
+    float K = (S > 1e-12f) ? (SigmaX_minus * H / S) : 0.0f;
+
+    float innovation = voltage_measurement - yhat;
+    float xhat_plus = xhat_minus + K * innovation;
+    float SigmaX_plus = (1.0f - K * H) * SigmaX_minus;
+
+    if (SigmaX_plus < 1e-6f) {
+        SigmaX_plus = 1e-6f;
+    }
+
+    if (xhat_plus < 0.0f) xhat_plus = 0.0f;
+    if (xhat_plus > 100.0f) xhat_plus = 100.0f;
+
+    *soc_estimate = xhat_plus;
+    *state_covariance = SigmaX_plus;
+    return xhat_plus;
+}
+
+float filter_step(float current, float voltage_measurement, float temperature,
+                  float dt, float* soc_estimate, float* state_covariance) {
+#if USE_EKF
+    return ekf_step(current, voltage_measurement, temperature, dt, soc_estimate, state_covariance);
+#else
+    return ukf_step(current, voltage_measurement, temperature, dt, soc_estimate, state_covariance);
+#endif
+}
+// #if 0
+int main(void) {
+    init_filter_system();
+    float soc_estimate = 100.0f;
+    float state_covariance = 1.0f;
+    float current = 12.49f;
+    float temperature = 25.0f;
+    float dt = 1.0f;
+    int max_iterations = 1000;
+    for (int k = 0; k < max_iterations && soc_estimate > 1.1f; k++) {
+        filter_step(current, voltage_measurement[k], temperature, dt, &soc_estimate, &state_covariance);
+        #ifdef DEBUGG
+        printf("%.4f\n",soc_estimate);
+        #endif
+    }
+    #ifdef ARMCM55
+    while( 1 )
+       {
+       	__asm volatile("nop");
+       }
+    #endif
+
+    return 0;
 }
 
 // #endif
@@ -594,3 +688,4 @@ __attribute__((noreturn)) int main(void) {
 // int main(void){
 //     printf("%.4f %.4f %.4f %.4f\n",ocv_table[1][6],ocv_table[1][7],ocv_table[0][6],ocv_table[0][7]);
 // }
+
