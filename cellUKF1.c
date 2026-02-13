@@ -6,8 +6,6 @@
 #include <stdio.h>
 #endif
 
-#ifndef ARMCM55
-
 float sqrtf(float x) {
     if (x < 0.0f) return 0.0f / 0.0f; // NaN
     if (x == 0.0f) return 0.0f;
@@ -22,11 +20,6 @@ float sqrtf(float x) {
 float fabs_f(float x) {
     return x < 0.0f ? -x : x;
 }
-#else
-#include <math.h>
-#define fabs_f fabs
-
-#endif
 
 // max number of RZ elements for embedded systems
 #define MAX_RZ_ELEMENTS 20
@@ -39,14 +32,14 @@ struct cellESR {
     float esrDC;
     float deltaV;
     int time;
-
+    
     // arrays for RZ elements
     float R_values[MAX_RZ_ELEMENTS];
     float tau_values[MAX_RZ_ELEMENTS];
     int indices[MAX_RZ_ELEMENTS];
     float ix_values[MAX_RZ_ELEMENTS];
     int num_elements;
-
+    
 };
 
 // for shared library
@@ -62,24 +55,24 @@ cellESR_t* cell=&cell_t;
 EXPORT cellESR_t* cellESR_create(float R0, float* RZlist_flat, int num_RZ) {
     // cellESR_t* cell= (cellESR_t*)(malloc ? malloc(sizeof(cellESR_t)) : cell);
     // if (!cell) return NULL;
-
+    
     cell->R0 = R0;
     cell->R0multiplier = 1.0f;
     cell->esrDC = R0;
     cell->deltaV = 0.0f;
     cell->time = 0;
     cell->num_elements = (num_RZ < MAX_RZ_ELEMENTS) ? num_RZ : MAX_RZ_ELEMENTS;
-
+    
     // Process RZlist (flattened array: [R0, Z0, type0, R1, Z1, type1, ...])
     for (int i = 0; i < cell->num_elements; i++) {
         float R = RZlist_flat[i * 3];
         float Z = RZlist_flat[i * 3 + 1];
         int type = (int)RZlist_flat[i * 3 + 2];  // 0 or 1
-
+        
         cell->R_values[i] = R;
         cell->ix_values[i] = 0.0f;
         cell->indices[i] = type;
-
+        
         if (type == 0) {
             // tau = R * Z, and add R to esrDC
             cell->tau_values[i] = R * Z;
@@ -89,7 +82,7 @@ EXPORT cellESR_t* cellESR_create(float R0, float* RZlist_flat, int num_RZ) {
             cell->tau_values[i] = Z / R;
         }
     }
-
+    
     return cell;
 }
 
@@ -103,35 +96,35 @@ EXPORT void cellESR_destroy(cellESR_t* cell) {
 // Calculate delta V using ESR model
 EXPORT float cellESR_calculateDeltaV(cellESR_t* cell, float i_new, float dt) {
     if (!cell) return 0.0f;
-
+    
     // Update time
     cell->time += dt;
-
+    
     // Calculate ESR contribution
     float ESRout = cell->R0 * cell->R0multiplier;
     float dV = i_new * ESRout;
-
+    
     // Process each RZ element
     for (int i = 0; i < cell->num_elements; i++) {
         // Update ix_values using: ix_next = (ix_previous + i_new * dt / tau) / (1 + dt / tau)
-        cell->ix_values[i] = (cell->ix_values[i] + i_new * dt / cell->tau_values[i]) /
+        cell->ix_values[i] = (cell->ix_values[i] + i_new * dt / cell->tau_values[i]) / 
                              (1.0f + dt / cell->tau_values[i]);
-
+        
         // Clamp values to prevent overshoot
         if (fabs_f(cell->ix_values[i]) > fabs_f(i_new)) {
             cell->ix_values[i] = i_new;
         }
-
+        
         // Calculate deltaV contribution based on type
         if (cell->indices[i] == 1) {
             // For indices == 1: dV += R * (i_new - ix_values)
             dV += cell->R_values[i] * (i_new - cell->ix_values[i]);
         } else {
-            // For indices == 0: dV += R * ix_values
+            // For indices == 0: dV += R * ix_values  
             dV += cell->R_values[i] * cell->ix_values[i];
         }
     }
-
+    
     cell->deltaV = dV;
     return dV;
 }
@@ -234,7 +227,7 @@ static const float temperatures[TEMP_POINTS] = {
 //         float r1  = q11*(1.0f-temp_weight)+q12*temp_weight;
 //         float r2  = q21*(1.0f-temp_weight)+q22*temp_weight;
 //         printf("--hi--");
-//         return r1*(1.0f-soc_weight)+r2*soc_weight;
+//         return r1*(1.0f-soc_weight)+r2*soc_weight; 
 
 //     }
 
@@ -352,13 +345,13 @@ float get_ocv_bilinear(float soc, float temp) {
     return r1 * soc_weight_inv + r2 * soc_weight;
 }
 
-#define Nx 1
-#define Nxa 3
+#define Nx 1       
+#define Nxa 3      
 #define Ny 1
-#define NUM_SIGMA_POINTS (2*Nxa+1)
+#define NUM_SIGMA_POINTS (2*Nxa+1) 
 
-static const float inv_2h2 = (float)(1.0f / (2.0f * 3.0f));
-static const float h = 1.732050808f;
+static const float inv_2h2 = (float)(1.0f / (2.0f * 3.0f));  
+static const float h = 1.732050808f; 
 static const float ocvSoH_gain_factor = 1.0f;
 
 // UKF weights
@@ -573,15 +566,7 @@ float ukf_step(float current, float voltage_measurement, float temperature,
     return xhat_plus;
 }
 // #if 0
-#ifdef ARMCM55
-extern void enable_cycle_counter(void);
-extern int get_cycle_count(void);
-#endif
 __attribute__((noreturn)) int main(void) {
-#ifdef ARMCM55
-		enable_cycle_counter();
-		volatile int x=get_cycle_count();
-#endif
         init_ukf_system();
         float soc_estimate = 100.0f;
         float state_covariance = 1.0f;
@@ -595,10 +580,7 @@ __attribute__((noreturn)) int main(void) {
             printf("%.4f %.4f %.4f\n",voltage_measurement[k],soc_estimate,current);
             #endif
         }
-
         #ifdef ARMCM55
-		volatile int y=get_cycle_count();
-		volatile int z=y-x;
         while( 1 )
            {
            	__asm volatile("nop");
@@ -612,4 +594,3 @@ __attribute__((noreturn)) int main(void) {
 // int main(void){
 //     printf("%.4f %.4f %.4f %.4f\n",ocv_table[1][6],ocv_table[1][7],ocv_table[0][6],ocv_table[0][7]);
 // }
-
