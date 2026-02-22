@@ -573,12 +573,12 @@ float ukf_step(float current, float voltage_measurement, float temperature,
     return xhat_plus;
 }
 // #if 0
-#ifdef ARMCM55
+#ifdef CYCLE
 extern void enable_cycle_counter(void);
 extern int get_cycle_count(void);
 #endif
 __attribute__((noreturn)) int main(void) {
-#ifdef ARMCM55
+#ifdef CYCLE
 		enable_cycle_counter();
 		volatile int x=get_cycle_count();
 #endif
@@ -592,13 +592,15 @@ __attribute__((noreturn)) int main(void) {
         for (int k = 0; k < max_iterations && soc_estimate > 1.1f; k++) {
             ukf_step(current, voltage_measurement[k], temperature, dt, &soc_estimate, &state_covariance);
             #ifdef DEBUGG
-            printf("%.4f %.4f %.4f\n",voltage_measurement[k],soc_estimate,current);
+            printf("%.4f\n",soc_estimate);
             #endif
         }
 
-        #ifdef ARMCM55
+        #ifdef CYCLE
 		volatile int y=get_cycle_count();
 		volatile int z=y-x;
+#endif
+#ifdef ARMCM55
         while( 1 )
            {
            	__asm volatile("nop");
