@@ -111,6 +111,7 @@ float cellESR_calculateDeltaV(cellESR_t* cell, float i_new, float dt) {
             // For indices == 0: dV += R * ix_values
             dV += cell->R_values[i] * cell->ix_values[i];
         }
+        //printf(" dV: %.4f ix: %.4f ",dV, cell->ix_values[i]);
     }
 
     cell->deltaV = dV;
@@ -191,7 +192,6 @@ float get_ocv_bilinear(float soc, float temp) {
     float q21 = ocv_table[100-soc_upper][temp_lower];
     float q22 = ocv_table[100-soc_upper][temp_upper];
     // printf("socl--%d socu--%d templ--%d tempu--%d\n",soc_lower,soc_upper,temp_lower,temp_upper);
-    // printf("q11-%.4f q12-%.4f q21-%.4f q22-%.4f ",q11,q12,q21,q22);
 
     // Perform bilinear interpolation
     float temp_weight_inv = 1.0f - temp_weight;
@@ -199,6 +199,7 @@ float get_ocv_bilinear(float soc, float temp) {
 
     float r1 = q11 * temp_weight_inv + q12 * temp_weight;
     float r2 = q21 * temp_weight_inv + q22 * temp_weight;
+    //printf("sl- %d su- %d tl- %d tu- %d q11-%.4f q12-%.4f q21-%.4f q22-%.4f r1-%.4f r2-%.4f ",soc_lower,soc_upper,temp_lower,temp_upper,q11,q12,q21,q22,r1,r2);
 
     // Compute derivative analytically: d(OCV)/d(soc) = r2 - r1
     // This is the derivative per 1% SOC change
@@ -254,7 +255,6 @@ float ekf_step(float current, float voltage_measurement, float temperature,
     // === TIME UPDATE ===
     float discharge = current * dt; // As
     float dSoC = 100.0f * discharge / (3.6f * coulombEfficiency * MaxCapacity * SoH / 100.0f);
-
     float xhat_minus = xhat - dSoC;
     float SigmaX_minus = SigmaX + SigmaW;
 
@@ -266,8 +266,10 @@ float ekf_step(float current, float voltage_measurement, float temperature,
     float deltaV = cellESR_calculateDeltaV(esr_model, current, dt);
     float ocv = get_ocv_bilinear(soc_bounded, temperature);
     float yhat = ocv * ocvSoH_gain_factor + deltaV;
+    //printf("soc_bounded: %.4f dSoC: %.4f xhat_minus: %.4f SigmaX_minus: %.4f deltaV: %.4f ocv: %.4f yhat: %.4f ",soc_bounded,dSoC,xhat_minus,SigmaX_minus,deltaV,ocv,yhat);
 
     float H = ocv_derivative_soc(soc_bounded, temperature) * ocvSoH_gain_factor;
+    //printf("H: %f ",H);
     float S = H * SigmaX_minus * H + SigmaV;
     float K = (S > 1e-12f) ? (SigmaX_minus * H / S) : 0.0f;
 
