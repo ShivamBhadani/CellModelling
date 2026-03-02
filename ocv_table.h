@@ -113,4 +113,6 @@ static const float ocv_table[SOC_POINTS][TEMP_POINTS] = {
     {2.282267115f, 2.440420158f, 2.598573201f, 2.717444171f, 2.836315141f, 2.925724556f, 2.990582675f, 3.043165146f, 3.073651451f, 3.084496719f, 3.065880432f, 3.027623108f, 2.989365784f, 2.951108461f},  /* SoC = 0% */
 };
 
+static const float* ocv_table_p = (float*)ocv_table;
+
 #endif /* OCV_TABLE_H */
